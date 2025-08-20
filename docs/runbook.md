@@ -100,3 +100,14 @@ The updater periodically fetches signed release tags and ensures the working cop
 Canary via per-host `target_tag`
 - Set `target_tag: vX.Y.Z-canary` on the chosen host in `inventory/hosts/*.yml` to canary that release; others will follow the highest stable tag.
 - After validation, clear `target_tag` and push a final `vX.Y.Z` tag to promote fleet-wide.
+
+## Controller deploy
+
+- Run these from your Mac (controller), not on the Wyse boxes.
+- Step 1: seed SSH known_hosts to avoid host key prompts and mismatches.
+  - Example:
+    - `export HOSTS=("wyse-dac=192.168.8.71" "wyse-sony=192.168.8.72")`
+    - `scripts/ops/seed-known-hosts.sh`
+- Step 2: provision both hosts (creates user, runtime dirs, units, watchers).
+  - Example:
+    - `SSH_USER=$USER scripts/ops/provision-hosts.sh`
