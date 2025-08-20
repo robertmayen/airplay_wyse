@@ -33,10 +33,13 @@ for entry in "${HOST_ARGS[@]}"; do
 set -euo pipefail
 APP_ROOT=/opt/airplay_wyse
 RUN_DIR=/run/airplay
+STATE_DIR=/var/lib/airplay_wyse
 
 # 1) Basics
 id airplay >/dev/null 2>&1 || adduser --system --group --home /nonexistent --no-create-home airplay
 install -d -m 0755 -o airplay -g airplay "$APP_ROOT" || true
+install -d -m 0755 -o airplay -g airplay "$STATE_DIR" || true
+install -d -m 0700 -o airplay -g airplay "$STATE_DIR/hashes" || true
 
 # deps
 export DEBIAN_FRONTEND=noninteractive
@@ -174,6 +177,7 @@ chown root:root "$APP_ROOT/bin/converge-broker"
 set -euo pipefail
 for c in git gpg jq systemctl; do command -v "$c" >/dev/null || { echo "missing $c"; exit 1; }; done
 [ -w . ] || { echo "not writable: $(pwd)"; exit 1; }
+[ -d /var/lib/airplay_wyse ] || { echo "missing /var/lib/airplay_wyse"; exit 1; }
 [ -d /run/airplay/queue ] || { echo "missing /run/airplay/queue"; exit 1; }
 echo "preflight OK"
 EOF
