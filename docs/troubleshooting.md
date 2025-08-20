@@ -13,3 +13,11 @@
   - Ensure the tag is an annotated, signed tag.
   - Import the maintainer GPG public key on the device: `gpg --import <pubkey.asc>`.
   - Re-run converge or the systemd unit.
+
+## Updater failures
+
+- verify-tag failed: device lacks maintainer GPG public key or tag is unsigned/untrusted.
+- No matching SemVer: repository has no `vX.Y.Z` tags; push a signed release tag.
+- Network/SSH/permissions: deploy key missing, remote denied, or no network; check `git fetch --tags origin` output and SSH config.
+- Checkout failed: local changes prevent checkout; ensure working copy is clean (converge and updater assume no local edits).
+- Systemd start failed: `systemctl start converge.service` requires the sudoers entry for `airplay` on the device.

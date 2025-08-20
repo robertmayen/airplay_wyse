@@ -1,0 +1,14 @@
+[Unit]
+Description=Airplay Wyse Updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=airplay
+WorkingDirectory=/opt/airplay_wyse
+ExecStart=/opt/airplay_wyse/bin/update
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,13 @@
+[Unit]
+Description=Airplay Wyse Updater Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=1min
+Persistent=true
+Unit=update.service
+
+[Install]
+WantedBy=timers.target
+

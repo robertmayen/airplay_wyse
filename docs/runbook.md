@@ -80,3 +80,23 @@ Goal: reduce blast radius by rolling out to a single canary device before promot
 Notes
 - Devices verify signed tags; missing or untrusted keys cause converge to exit with code 5 (verify_failed).
 - Keep inventories for both `wyse-sony` and `wyse-dac` in sync for host-affecting keys (`nic`, `alsa.vendor_id`, `alsa.product_id`, `alsa.serial`, `airplay_name`).
+
+## Updater
+
+The updater periodically fetches signed release tags and ensures the working copy points at the desired tag before starting `converge`.
+
+- Service/Timer: `update.service` (oneshot) and `update.timer` run as `airplay` in `/opt/airplay_wyse`.
+- Timer cadence: `OnBootSec=2min`, `OnUnitActiveSec=10min`, `RandomizedDelaySec=1min`, `Persistent=true`.
+- Tag selection:
+  - If the host inventory defines `target_tag: vX.Y.Z` in `inventory/hosts/$(hostname -s).yml`, the updater uses that tag (useful for canaries).
+  - Otherwise, it selects the highest SemVer tag matching `^v\d+\.\d+\.\d+$` (pre-releases like `-rc1` are ignored).
+- Security:
+  - Tags must be signed; the device must trust the signer key so `git verify-tag <tag>` succeeds (GPG or SSH signatures supported by your git build).
+  - `git fetch --tags origin` uses your configured deploy key/SSH credentials.
+- Flow:
+  1) Fetch tags, 2) pick target, 3) verify signature, 4) checkout `tags/<target>` if needed, 5) `systemctl start converge.service`.
+- State: writes `/var/lib/airplay_wyse/last-update.txt` with timestamp, status, and revision.
+
+Canary via per-host `target_tag`
+- Set `target_tag: vX.Y.Z-canary` on the chosen host in `inventory/hosts/*.yml` to canary that release; others will follow the highest stable tag.
+- After validation, clear `target_tag` and push a final `vX.Y.Z` tag to promote fleet-wide.
