@@ -105,9 +105,8 @@ Canary via per-host `target_tag`
 
 - Run these from your Mac (controller), not on the Wyse boxes.
 - Step 1: seed SSH known_hosts to avoid host key prompts and mismatches.
-  - Example:
-    - `export HOSTS=("wyse-dac=192.168.8.71" "wyse-sony=192.168.8.72")`
-    - `scripts/ops/seed-known-hosts.sh`
+  - fish: `scripts/ops/seed-known-hosts.sh wyse-dac=192.168.8.71 wyse-sony=192.168.8.72`
+  - or POSIX shells: `HOSTS_LIST="wyse-dac=192.168.8.71 wyse-sony=192.168.8.72" scripts/ops/seed-known-hosts.sh`
 - Step 2: provision both hosts (creates user, runtime dirs, units, watchers).
-  - Example:
-    - `SSH_USER=$USER scripts/ops/provision-hosts.sh`
+  - fish: `SSH_USER=$USER scripts/ops/provision-hosts.sh wyse-dac=192.168.8.71 wyse-sony=192.168.8.72`
+  - or POSIX shells: `HOSTS_LIST="wyse-dac=192.168.8.71 wyse-sony=192.168.8.72" SSH_USER=$USER scripts/ops/provision-hosts.sh`

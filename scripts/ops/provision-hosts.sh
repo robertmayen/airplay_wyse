@@ -3,9 +3,20 @@ set -euo pipefail
 
 # Run from your Mac (controller). Do NOT run on the Wyse boxes.
 # Usage:
-#   HOSTS=("wyse-dac=192.168.8.71" "wyse-sony=192.168.8.72") SSH_USER=rmayen scripts/ops/provision-hosts.sh
+#   scripts/ops/provision-hosts.sh wyse-dac=192.168.8.71 wyse-sony=192.168.8.72
+# or:
+#   HOSTS_LIST="wyse-dac=192.168.8.71 wyse-sony=192.168.8.72" scripts/ops/provision-hosts.sh
 
-: "${HOSTS:?Set HOSTS like: HOSTS=(\"wyse-dac=192.168.8.71\" \"wyse-sony=192.168.8.72\") }"
+HOST_ARGS=( "$@" )
+if [[ ${#HOST_ARGS[@]} -eq 0 ]]; then
+  if [[ -n "${HOSTS_LIST:-}" ]]; then
+    # shellcheck disable=SC2206  # intentional split on spaces from HOSTS_LIST
+    HOST_ARGS=( ${HOSTS_LIST} )
+  else
+    echo "Provide hosts as args: name=ip ...  or set HOSTS_LIST" >&2
+    exit 2
+  fi
+fi
 SSH_USER="${SSH_USER:-rmayen}"
 SSH_PORT="${SSH_PORT:-22}"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$SSH_PORT")
@@ -13,7 +24,7 @@ SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$SSH_PORT")
 APP_ROOT=/opt/airplay_wyse
 RUN_DIR=/run/airplay
 
-for entry in "${HOSTS[@]}"; do
+for entry in "${HOST_ARGS[@]}"; do
   name="${entry%%=*}"
   ip="${entry#*=}"
   echo "=== $name ($ip) ==="
@@ -182,4 +193,3 @@ REMOTE
 done
 
 echo "All done."
-

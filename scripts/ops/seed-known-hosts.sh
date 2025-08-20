@@ -2,11 +2,22 @@
 set -euo pipefail
 
 # Usage:
-#   HOSTS=("wyse-dac=192.168.8.71" "wyse-sony=192.168.8.72") ./scripts/ops/seed-known-hosts.sh
+#   scripts/ops/seed-known-hosts.sh wyse-dac=192.168.8.71 wyse-sony=192.168.8.72
+# or:
+#   HOSTS_LIST="wyse-dac=192.168.8.71 wyse-sony=192.168.8.72" scripts/ops/seed-known-hosts.sh
 # Seeds ~/.ssh/known_hosts for both hostnames AND IPs to avoid "Host key verification failed".
 # Uses ssh-keygen -R to remove stale keys, then ssh-keyscan to add fresh keys.
 
-: "${HOSTS:?Set HOSTS like: HOSTS=(\"wyse-dac=192.168.8.71\" \"wyse-sony=192.168.8.72\") }"
+HOST_ARGS=( "$@" )
+if [[ ${#HOST_ARGS[@]} -eq 0 ]]; then
+  if [[ -n "${HOSTS_LIST:-}" ]]; then
+    # shellcheck disable=SC2206  # intentional split on spaces from HOSTS_LIST
+    HOST_ARGS=( ${HOSTS_LIST} )
+  else
+    echo "Provide hosts as args: name=ip ...  or set HOSTS_LIST" >&2
+    exit 2
+  fi
+fi
 SSH_PORT="${SSH_PORT:-22}"
 KEY_TYPES="${KEY_TYPES:-ed25519,ecdsa,rsa}"
 KNOWN="${KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}"
@@ -15,7 +26,7 @@ mkdir -p "$(dirname "$KNOWN")"
 touch "$KNOWN"
 chmod 600 "$KNOWN"
 
-for entry in "${HOSTS[@]}"; do
+for entry in "${HOST_ARGS[@]}"; do
   name="${entry%%=*}"
   ip="${entry#*=}"
 
@@ -30,4 +41,3 @@ for entry in "${HOSTS[@]}"; do
 done
 
 echo "known_hosts seeded: $KNOWN"
-
