@@ -1,19 +1,16 @@
-# Validate with: visudo -cf /etc/sudoers.d/airplay-wyse
+# Managed by repo. Install via visudo -f /etc/sudoers.d/airplay-wyse
+# Minimal rules to support converge v0.1.8 while keeping least privilege.
 
-User_Alias AIRPLAY = airplay
-Cmnd_Alias AIRPLAY_APT = /usr/bin/apt-get update, /usr/bin/apt-get install *
-Cmnd_Alias AIRPLAY_DPKG = /usr/bin/dpkg -i /opt/airplay_wyse/pkg/artifacts/*
-Cmnd_Alias AIRPLAY_SYS = /bin/systemctl daemon-reload, /bin/systemctl enable *, /bin/systemctl start *, /bin/systemctl restart *, /bin/systemctl try-restart *, /bin/systemctl is-active *, /bin/systemctl show *
-Cmnd_Alias AIRPLAY_FS = /usr/bin/install *, /usr/bin/tee *
-Cmnd_Alias AIRPLAY_GIT = /usr/bin/git *
+airplay ALL=(root) NOPASSWD: /usr/bin/install *
+airplay ALL=(root) NOPASSWD: /usr/bin/apt-get update
+airplay ALL=(root) NOPASSWD: /usr/bin/apt-get install *
 
-AIRPLAY ALL=(root) NOPASSWD: AIRPLAY_APT, AIRPLAY_DPKG, AIRPLAY_SYS, AIRPLAY_FS, AIRPLAY_GIT
-# This file must be installed under /etc/sudoers.d via visudo -cf; do NOT edit /etc/sudoers directly.
-
-# Scoped commands allowed for 'airplay' (least privilege). Adjust as needed for your environment.
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl start converge.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl stop converge.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart converge.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl status converge.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable converge.service
+# Service control for core daemons
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable nqptp.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable shairport-sync.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable avahi-daemon.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl start nqptp.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart shairport-sync.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart avahi-daemon.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl try-restart shairport-sync.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl try-restart avahi-daemon.service

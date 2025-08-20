@@ -22,6 +22,13 @@
 - Checkout failed: local changes prevent checkout; ensure working copy is clean (converge and updater assume no local edits).
 - Systemd start failed: `systemctl start converge.service` requires the sudoers entry for `airplay` on the device.
 
+## Converge fails with “sudo: The no new privileges flag is set”
+- Cause: unit had NoNewPrivileges=true which forbids privilege escalation.
+- Fix: remove NoNewPrivileges=true from converge.service and reload daemon.
+
+Note: If your distro mounts `/opt` with `noexec`, converge will fail with exit 203/EXEC.
+- Workarounds: remount `/opt` with `exec`; or move the repo to `/srv/airplay_wyse` and update the unit path accordingly.
+
 ## Updater cannot start converge (Access denied)
 - Cause: update.service runs as 'airplay' and system units require root or policy.
 - Fix: updater uses 'sudo systemctl …' and sudoers must include the exact path (/usr/bin/systemctl). Validate with `visudo -cf /etc/sudoers.d/airplay-wyse`.

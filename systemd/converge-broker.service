@@ -1,0 +1,17 @@
+[Unit]
+Description=Airplay root broker (exec allow-listed privileged ops)
+Documentation=man:systemd.path(5)
+ConditionPathIsReadWrite=/run/airplay/queue
+
+[Service]
+Type=oneshot
+ExecStart=/opt/airplay_wyse/bin/converge-broker
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/airplay /opt/airplay_wyse
+User=root
+
+[Install]
+WantedBy=multi-user.target
+

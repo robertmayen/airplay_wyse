@@ -20,17 +20,35 @@ EXIT_SYSTEMD=11
 log() { echo "$(date --iso-8601=seconds) [converge] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
+# Sudo debug wrapper for visibility
+sudo_wrapper() {
+  local cmd=("$@")
+  echo "[SUDO] ${cmd[*]}" >&2
+  if ! sudo -n "${cmd[@]}"; then
+    echo "[SUDO FAILED] Check /etc/sudoers.d/airplay-wyse" >&2
+    echo "[SUDO TEST] Running: sudo -l" >&2
+    sudo -l 2>&1 | grep -E "may run|NOPASSWD" >&2 || true
+    return 1
+  fi
+}
+
 ensure_dirs() {
-  sudo install -d -m 0755 "$STATE_DIR" "$RUN_DIR" "$ETC_DIR" || true
-  sudo install -d -m 0700 "$STATE_DIR/hashes" || true
+  sudo_wrapper install -d -m 0755 "$STATE_DIR" "$RUN_DIR" "$ETC_DIR" || true
+  sudo_wrapper install -d -m 0700 "$STATE_DIR/hashes" || true
 }
 
 emit_health() {
   local status="$1" code="$2" reason="$3"
   local json
   json=$(jq -n --arg status "$status" --arg reason "$reason" --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" '{status:$status, reason:$reason, version:$version, ts: now|tojson}') || json="{}"
-  printf "%s\n" "$json" | sudo tee "$STATE_DIR/last-health.json" >/dev/null || true
-  echo "status=$status code=$code reason=$reason" | sudo tee "$STATE_DIR/last-health.txt" >/dev/null || true
+  local tmpj; tmpj=$(mktemp)
+  printf "%s\n" "$json" >"$tmpj"
+  sudo_wrapper install -m 0644 "$tmpj" "$STATE_DIR/last-health.json" || true
+  rm -f "$tmpj"
+  local tmpt; tmpt=$(mktemp)
+  echo "status=$status code=$code reason=$reason" >"$tmpt"
+  sudo_wrapper install -m 0644 "$tmpt" "$STATE_DIR/last-health.txt" || true
+  rm -f "$tmpt"
   return "$code"
 }
 
@@ -95,7 +113,7 @@ render_template() {
   sed -i "s/{{AIRPLAY_NAME}}/${AIRPLAY_NAME//\//\/}/g" "$tmp"
   sed -i "s/{{ALSA_DEVICE}}/${ALSA_DEVICE//\//\/}/g" "$tmp"
   sed -i "s/{{AVAHI_IFACE}}/${AVAHI_IFACE//\//\/}/g" "$tmp"
-  sudo install -m 0644 "$tmp" "$dst"
+  sudo_wrapper install -m 0644 "$tmp" "$dst"
   rm -f "$tmp"
 }
 
@@ -105,7 +123,9 @@ needs_update() {
   cur=""
   [[ -f "$STATE_DIR/hashes/$key" ]] && cur=$(cat "$STATE_DIR/hashes/$key")
   if [[ "$new" != "$cur" ]]; then
-    echo "$new" | sudo tee "$STATE_DIR/hashes/$key" >/dev/null
+    local tmph; tmph=$(mktemp); echo "$new" >"$tmph"
+    sudo_wrapper install -m 0600 "$tmph" "$STATE_DIR/hashes/$key" || true
+    rm -f "$tmph"
     return 0
   fi
   return 1
@@ -183,17 +203,17 @@ apply_configs() {
     "/etc/shairport-sync.conf"
   if needs_update "/etc/shairport-sync.conf" shairport-sync.conf; then
     changed=1
-    sudo systemctl try-restart shairport-sync.service || return 3
+    sudo_wrapper systemctl try-restart shairport-sync.service || return 3
   fi
 
   # avahi iface restrict (optional)
   if [[ -f "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" ]]; then
-    sudo install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
+    sudo_wrapper install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" \
       "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"
     if needs_update "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" avahi-iface.conf; then
       changed=1
-      sudo systemctl try-restart avahi-daemon.service || return 3
+      sudo_wrapper systemctl try-restart avahi-daemon.service || return 3
     fi
   fi
 
@@ -238,8 +258,8 @@ main() {
   fi
 
   # Ensure nqptp then shairport ordering
-  sudo systemctl enable nqptp.service shairport-sync.service avahi-daemon.service >/dev/null 2>&1 || true
-  sudo systemctl start nqptp.service >/dev/null 2>&1 || true
+  sudo_wrapper systemctl enable nqptp.service shairport-sync.service avahi-daemon.service || true
+  sudo_wrapper systemctl start nqptp.service || true
 
   # Apply configs and possibly restart services
   set +e

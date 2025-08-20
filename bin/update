@@ -85,14 +85,12 @@ main() {
     git checkout -f "tags/$target_tag"
   fi
 
-  log "Starting converge.service"
-  if ! /usr/bin/sudo -n /usr/bin/systemctl start converge.service; then
-    log "Failed to start converge.service via sudo"
-    exit 4
-  fi
+  # Emit trigger for converge via path unit (no direct systemctl here)
+  install -d -m 2775 -o root -g airplay /run/airplay || true
+  : > /run/airplay/update.trigger
 
   write_last_update "$target_tag" 0
-  log "Updater completed"
+  log "Updater completed (triggered converge)"
 }
 
 trap 'rc=$?; if [[ $rc -ne 0 ]]; then log "Updater failed rc=$rc"; fi; exit $rc' EXIT

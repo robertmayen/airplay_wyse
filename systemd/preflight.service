@@ -1,5 +1,5 @@
 [Unit]
-Description=Airplay Wyse Converge
+Description=Airplay preflight checks
 After=network-online.target
 Wants=network-online.target
 
@@ -7,8 +7,9 @@ Wants=network-online.target
 Type=oneshot
 User=airplay
 WorkingDirectory=/opt/airplay_wyse
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/opt/airplay_wyse/bin/converge
+ExecStart=/opt/airplay_wyse/bin/preflight
+StandardOutput=journal+console
 
 [Install]
 WantedBy=multi-user.target
+

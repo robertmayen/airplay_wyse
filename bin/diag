@@ -1,27 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "== Systemd units =="
-systemctl --no-pager --full status nqptp.service shairport-sync.service avahi-daemon.service || true
+echo "=== System ==="
+hostnamectl || true
+systemctl --version || true
 
-echo "\n== Network/mDNS interfaces =="
-ip -brief addr || true
-systemctl --no-pager --full status avahi-daemon.service || true
+echo -e "\n=== Services (update, converge, broker) ==="
+for u in update.service converge.service converge-broker.service converge-broker.path update-done.path; do
+  echo "# $u"
+  systemctl status --no-pager -l "$u" || true
+done
 
-echo "\n== Avahi browse (local) =="
-if command -v avahi-browse >/dev/null; then
-  avahi-browse -rt _airplay._tcp || true
-  avahi-browse -rt _raop._tcp || true
-else
-  echo "avahi-browse not installed"
-fi
+echo -e "\n=== Sudoers glimpse ==="
+sudo -n -v && echo "sudo nopass OK" || echo "sudo requires pw or disabled"
+sudo -l 2>&1 | grep -E "NOPASSWD|may run" || true
 
-echo "\n== nqptp logs (recent) =="
-journalctl -u nqptp --since "-15min" --no-pager || true
+echo -e "\n=== Exec bits ==="
+find bin pkg -maxdepth 1 -type f -name "*.sh" -exec ls -l {} \;
 
-echo "\n== shairport-sync logs (recent) =="
-journalctl -u shairport-sync --since "-15min" --no-pager || true
+echo -e "\n=== Deps ==="
+for c in git gpg jq systemctl; do command -v "$c" || true; done
 
-echo "\n== ALSA devices =="
-aplay -l || true
-arecord -l || true
+echo -e "\n=== Recent logs ==="
+journalctl -u update -u converge -u converge-broker --since "1 hour ago" --no-pager || true

@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger converge when update.trigger changes
+
+[Path]
+PathChanged=/run/airplay/update.trigger
+Unit=converge.service
+MakeDirectory=yes
+DirectoryMode=2775
+
+[Install]
+WantedBy=multi-user.target
+

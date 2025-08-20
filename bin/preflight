@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+req=(git gpg jq systemctl)
+for c in "${req[@]}"; do
+  if ! command -v "$c" >/dev/null 2>&1; then
+    echo "[FAIL] missing: $c" >&2
+    exit 1
+  fi
+  echo "[OK] $c=$(command -v "$c")"
+done
+
+# workspace
+[ -w . ] || { echo "[FAIL] not writable: $(pwd)"; exit 1; }
+
+# sudo availability
+if ! sudo -n true 2>/dev/null; then
+  echo "[FAIL] sudo requires password or is not configured" >&2
+  exit 1
+fi
+
+# exec bits
+for f in bin/update bin/converge bin/diag pkg/install.sh; do
+  [ -x "$f" ] || { echo "[FAIL] not executable: $f"; exit 1; }
+done
+
+echo "[OK] preflight passed"

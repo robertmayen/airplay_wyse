@@ -22,3 +22,5 @@ jobs:
           fi
           bash scripts/ci/check-inventory-pair.sh
 
+      - name: Check exec bits on scripts
+        run: bash scripts/ci/check-exec-bits.sh
