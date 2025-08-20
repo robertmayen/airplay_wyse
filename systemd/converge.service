@@ -9,6 +9,10 @@ User=airplay
 WorkingDirectory=/opt/airplay_wyse
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/airplay_wyse/bin/converge
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/airplay_wyse /run/airplay /opt/airplay_wyse
 
 [Install]
 WantedBy=multi-user.target

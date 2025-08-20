@@ -10,3 +10,9 @@ fi
 
 echo "[smoke] Health:"
 ./bin/health || true
+
+echo "[smoke] Broker queue test:"
+./tests/queue_smoke.sh || true
+
+echo "[smoke] Policy test (no sudo in converge path):"
+./tests/no_sudo.sh

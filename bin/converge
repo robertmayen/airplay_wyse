@@ -5,7 +5,8 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 STATE_DIR="/var/lib/airplay_wyse"
-RUN_DIR="/run/airplay_wyse"
+RUN_DIR="/run/airplay"
+QUEUE_DIR="$RUN_DIR/queue"
 ETC_DIR="/etc/airplay_wyse"
 
 EXIT_OK=0
@@ -20,21 +21,22 @@ EXIT_SYSTEMD=11
 log() { echo "$(date --iso-8601=seconds) [converge] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-# Sudo debug wrapper for visibility
-sudo_wrapper() {
-  local cmd=("$@")
-  echo "[SUDO] ${cmd[*]}" >&2
-  if ! sudo -n "${cmd[@]}"; then
-    echo "[SUDO FAILED] Check /etc/sudoers.d/airplay-wyse" >&2
-    echo "[SUDO TEST] Running: sudo -l" >&2
-    sudo -l 2>&1 | grep -E "may run|NOPASSWD" >&2 || true
-    return 1
-  fi
+enqueue_cmd() {
+  # Write a one-line root command into the broker queue; broker executes if allow-listed.
+  local line="$*"
+  local ts rand f
+  ts=$(date +%s)
+  rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  f="$QUEUE_DIR/${ts}.${rand}.cmd"
+  printf '%s\n' "$line" >"$f"
 }
 
 ensure_dirs() {
-  sudo_wrapper install -d -m 0755 "$STATE_DIR" "$RUN_DIR" "$ETC_DIR" || true
-  sudo_wrapper install -d -m 0700 "$STATE_DIR/hashes" || true
+  # State dir may be created by provisioning; create lazily if writable.
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  mkdir -p "$STATE_DIR/hashes" 2>/dev/null || true
+  # Queue dir should be present via systemd.path MakeDirectory; fall back if missing.
+  mkdir -p "$QUEUE_DIR" 2>/dev/null || true
 }
 
 emit_health() {
@@ -43,11 +45,11 @@ emit_health() {
   json=$(jq -n --arg status "$status" --arg reason "$reason" --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" '{status:$status, reason:$reason, version:$version, ts: now|tojson}') || json="{}"
   local tmpj; tmpj=$(mktemp)
   printf "%s\n" "$json" >"$tmpj"
-  sudo_wrapper install -m 0644 "$tmpj" "$STATE_DIR/last-health.json" || true
+  install -m 0644 "$tmpj" "$STATE_DIR/last-health.json" 2>/dev/null || true
   rm -f "$tmpj"
   local tmpt; tmpt=$(mktemp)
   echo "status=$status code=$code reason=$reason" >"$tmpt"
-  sudo_wrapper install -m 0644 "$tmpt" "$STATE_DIR/last-health.txt" || true
+  install -m 0644 "$tmpt" "$STATE_DIR/last-health.txt" 2>/dev/null || true
   rm -f "$tmpt"
   return "$code"
 }
@@ -113,7 +115,8 @@ render_template() {
   sed -i "s/{{AIRPLAY_NAME}}/${AIRPLAY_NAME//\//\/}/g" "$tmp"
   sed -i "s/{{ALSA_DEVICE}}/${ALSA_DEVICE//\//\/}/g" "$tmp"
   sed -i "s/{{AVAHI_IFACE}}/${AVAHI_IFACE//\//\/}/g" "$tmp"
-  sudo_wrapper install -m 0644 "$tmp" "$dst"
+  # Write rendered file to a temp path owned by airplay; a root copy, if needed, must be enqueued externally.
+  install -m 0644 "$tmp" "$dst" 2>/dev/null || true
   rm -f "$tmp"
 }
 
@@ -124,7 +127,7 @@ needs_update() {
   [[ -f "$STATE_DIR/hashes/$key" ]] && cur=$(cat "$STATE_DIR/hashes/$key")
   if [[ "$new" != "$cur" ]]; then
     local tmph; tmph=$(mktemp); echo "$new" >"$tmph"
-    sudo_wrapper install -m 0600 "$tmph" "$STATE_DIR/hashes/$key" || true
+    install -m 0600 "$tmph" "$STATE_DIR/hashes/$key" 2>/dev/null || true
     rm -f "$tmph"
     return 0
   fi
@@ -198,23 +201,27 @@ apply_configs() {
     return 2
   fi
 
-  # shairport-sync
-  render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" \
-    "/etc/shairport-sync.conf"
-  if needs_update "/etc/shairport-sync.conf" shairport-sync.conf; then
-    changed=1
-    sudo_wrapper systemctl try-restart shairport-sync.service || return 3
+  # shairport-sync (render into tmp and request a restart via broker if needed)
+  local tmp_ss; tmp_ss=$(mktemp)
+  render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
+  if [[ -f "/etc/shairport-sync.conf" ]]; then
+    if ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
+      changed=1
+      enqueue_cmd /usr/bin/systemctl restart airplay-shairport
+    fi
   fi
+  rm -f "$tmp_ss"
 
   # avahi iface restrict (optional)
   if [[ -f "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" ]]; then
-    sudo_wrapper install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
-    render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" \
-      "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"
-    if needs_update "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" avahi-iface.conf; then
+    # Render to temp; copy + restart handled via broker if policy later allows.
+    local tmp_av; tmp_av=$(mktemp)
+    render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
+    if [[ -f "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" ]] && ! cmp -s "$tmp_av" "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"; then
       changed=1
-      sudo_wrapper systemctl try-restart avahi-daemon.service || return 3
+      enqueue_cmd /usr/bin/systemctl restart airplay-avahi
     fi
+    rm -f "$tmp_av"
   fi
 
   return $changed
@@ -257,9 +264,7 @@ main() {
     exit "$EXIT_PKG"
   fi
 
-  # Ensure nqptp then shairport ordering
-  sudo_wrapper systemctl enable nqptp.service shairport-sync.service avahi-daemon.service || true
-  sudo_wrapper systemctl start nqptp.service || true
+  # Enqueue service restarts as needed; enabling is intentionally left to provisioning or packages
 
   # Apply configs and possibly restart services
   set +e
@@ -285,7 +290,7 @@ main() {
   fi
 
   if [[ $cfg_rc -eq 1 ]]; then
-    emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied" >/dev/null || true
+    emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
     exit "$EXIT_CHANGED"
   fi
   emit_health "healthy" "$EXIT_OK" "no changes" >/dev/null || true

@@ -2,42 +2,49 @@
 set -euo pipefail
 
 # Ensure required packages present and meet minimum versions.
-# This script is safe to re-run and should be permitted via sudoers for converge.
+# Broker-only: enqueue root-required operations to /run/airplay/queue; never call sudo.
 
 REQ_PKGS=(shairport-sync nqptp avahi-daemon avahi-utils jq)
 
 have() { dpkg -s "$1" >/dev/null 2>&1; }
 ver() { dpkg-query -W -f='${Version}\n' "$1" 2>/dev/null | awk -F- '{print $1}'; }
 
-readarray -t mins < <("$(dirname "$0")/versions.sh")
-declare -A gate
-for line in "${mins[@]}"; do eval "$line"; done
+# Source versions with repo-relative path; ignore stdout from helper.
+# shellcheck disable=SC1091
+. "$(dirname "$0")/versions.sh" >/dev/null 2>&1 || true
 
 changed=0
+QUEUE_DIR="/run/airplay/queue"
+mkdir -p "$QUEUE_DIR" 2>/dev/null || true
 
-sudo mkdir -p /etc/apt/preferences.d
+# Ensure apt preferences directory via broker, then stage preference files via broker tee (with .in payloads)
+ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+printf '/usr/bin/install -d -m 0755 /etc/apt/preferences.d\n' >"$QUEUE_DIR/${ts}.${rand}.cmd"
 for pref in "$(dirname "$0")"/apt-pins.d/*.pref; do
   [[ -f "$pref" ]] || continue
-  sudo install -m 0644 "$pref" "/etc/apt/preferences.d/$(basename "$pref")"
+  base=$(basename "$pref")
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  echo "/usr/bin/tee /etc/apt/preferences.d/$base" >"$QUEUE_DIR/${ts}.${rand}.cmd"
+  cp "$pref" "$QUEUE_DIR/${ts}.${rand}.in"
+  changed=1
 done
 
-sudo apt-get update -y || true
-
+# Package installs via broker (best-effort without apt-get update)
 for p in "${REQ_PKGS[@]}"; do
   if ! have "$p"; then
-    sudo apt-get install -y "$p" && changed=1
+    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+    echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
     continue
   fi
   inst_ver=$(ver "$p")
   min_var="MIN_$(echo "$p" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
   min_ver="${!min_var:-}"
   if [[ -n "$min_ver" ]]; then
-    dpkg --compare-versions "$inst_ver" ge "$min_ver" || { sudo apt-get install -y "$p" && changed=1; }
+    dpkg --compare-versions "$inst_ver" ge "$min_ver" || {
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1;
+    }
   fi
 done
-
-# Enable services (idempotent)
-sudo systemctl enable nqptp.service shairport-sync.service avahi-daemon.service || true
-sudo systemctl start nqptp.service avahi-daemon.service || true
 
 exit $changed

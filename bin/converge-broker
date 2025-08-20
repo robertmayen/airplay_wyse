@@ -22,16 +22,35 @@ is_allowed() {
       # allow only restarts of our stack
       [ "${1:-}" = "restart" ] && [[ "${2:-}" == airplay-* ]] && exit 0 || true
       ;;
+    /usr/bin/install)
+      shift
+      # allow only creation of apt preferences dir
+      [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ] && [ "${4:-}" = "/etc/apt/preferences.d" ] && exit 0 || true
+      ;;
+    /usr/bin/tee)
+      shift
+      # allow only writing to apt preferences files
+      [[ "${1:-}" == /etc/apt/preferences.d/*.pref ]] && exit 0 || true
+      ;;
   esac
   exit 1
 }
 
 process_one() {
   local f="$1"; local okf="${f%.cmd}.ok"; local errf="${f%.cmd}.err"
+  local inf="${f%.cmd}.in"
   local line; line="$(cat "$f")"
   # shellcheck disable=SC2206
   args=( $line )
   if is_allowed "${args[@]}"; then :; else echo "DENY: $line" >"$errf"; rm -f "$f"; return 0; fi
+  if [[ "${args[0]}" == "/usr/bin/tee" && -f "$inf" ]]; then
+    if "${args[@]}" <"$inf" 2> >(tee "$errf".tmp >&2); then
+      : > "$okf"; rm -f "$errf".tmp "$inf"
+    else
+      mv "$errf".tmp "$errf"
+    fi
+    rm -f "$f"; return 0
+  fi
   if "${args[@]}" 2> >(tee "$errf".tmp >&2); then
     : > "$okf"
     rm -f "$errf".tmp
@@ -47,4 +66,3 @@ run_pending() {
 }
 
 run_pending
-
