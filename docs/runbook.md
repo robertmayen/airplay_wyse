@@ -110,3 +110,11 @@ Canary via per-host `target_tag`
 - Step 2: provision both hosts (creates user, runtime dirs, units, watchers).
   - fish: `SSH_USER=$USER scripts/ops/provision-hosts.sh wyse-dac=192.168.8.71 wyse-sony=192.168.8.72`
   - or POSIX shells: `HOSTS_LIST="wyse-dac=192.168.8.71 wyse-sony=192.168.8.72" SSH_USER=$USER scripts/ops/provision-hosts.sh`
+
+## CI
+
+- GitHub Actions workflow: `.github/workflows/ci.yml` runs on push/PR.
+- Checks:
+  - Policy: `tests/no_sudo.sh` enforces broker-only model (no direct `sudo` in converge path).
+  - Smoke: `tests/smoke.sh` runs converge and health; `tests/queue_smoke.sh` validates the broker queue processes a command.
+- Local: `make test` runs the same checks; ensure `ripgrep` is installed for the policy test.

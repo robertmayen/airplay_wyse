@@ -12,7 +12,9 @@ lint:
 	@echo "(no-op) linting not configured"
 
 test:
-	@./tests/smoke.sh || true
+	@bash ./tests/no_sudo.sh
+	@bash ./tests/queue_smoke.sh || true
+	@bash ./tests/smoke.sh || true
 
 vm-test:
 	@echo "Run tests in local Debian 12/13 VM (see tests/vm/)"
