@@ -189,3 +189,10 @@
 - Run in a VM when testing host-affecting changes; `make vm-test` describes the flow.
 - Keep sudoers minimal (see `security/`); validate with `visudo -cf` before deploying.
 - For debugging service discovery, use `tests/avahi_browse.sh`; for timing/audio, check `tests/journal_parsers.sh`.
+
+## Contribute
+- CI gates: push/PR runs policy (`tests/no_sudo.sh`) and smoke (`tests/smoke.sh`, `tests/queue_smoke.sh`).
+- Local: `make test` mirrors CI; install `ripgrep` for the policy check.
+- Broker-only: never use `sudo` in converge or pkg paths; enqueue root ops to `/run/airplay/queue` as `.cmd` (with optional `.in` for tee payloads).
+- Units: keep `converge-broker.path` pointing at `DirectoryNotEmpty=/run/airplay/queue` with `Unit=converge-broker.service`.
+- Commits: small, focused; prefer Conventional Commits (feat:, fix:, chore:).
