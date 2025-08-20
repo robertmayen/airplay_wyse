@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  inventory-pair-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run inventory pair guard
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            export DIFF_RANGE="${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+          else
+            export DIFF_RANGE="${{ github.event.before }}...${{ github.sha }}"
+          fi
+          bash scripts/ci/check-inventory-pair.sh
+

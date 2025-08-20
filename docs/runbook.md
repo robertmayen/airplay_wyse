@@ -59,3 +59,24 @@ Prereqs
 Notes
 - Working directory is `/opt/airplay_wyse` by default.
 - Keep the sudoers policy as narrow as possible and validate with `visudo -cf`.
+## Canary → Promotion with Signed Tags
+
+Goal: reduce blast radius by rolling out to a single canary device before promoting to all.
+
+1) Prepare and push a canary tag
+- Create a signed, annotated tag for canary: `git tag -s vX.Y.Z-canary -m "Canary: vX.Y.Z"`
+- Push the tag: `git push origin vX.Y.Z-canary`
+- Ensure the device(s) have the maintainer GPG public key installed so `git verify-tag` succeeds.
+
+2) Target the canary host only
+- Update only the chosen host’s inventory selector (if applicable) or otherwise ensure only one device converges on the canary tag.
+- Monitor for the agreed period (e.g., 24–72 hours): playback stability, logs, CPU/mem, network.
+
+3) Promote to full release
+- Create the final signed, annotated tag: `git tag -s vX.Y.Z -m "Release vX.Y.Z"`
+- Push the tag: `git push origin vX.Y.Z`
+- Remove any canary-only overrides so both hosts converge on `vX.Y.Z`.
+
+Notes
+- Devices verify signed tags; missing or untrusted keys cause converge to exit with code 5 (verify_failed).
+- Keep inventories for both `wyse-sony` and `wyse-dac` in sync for host-affecting keys (`nic`, `alsa.vendor_id`, `alsa.product_id`, `alsa.serial`, `airplay_name`).
