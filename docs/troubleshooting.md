@@ -21,3 +21,8 @@
 - Network/SSH/permissions: deploy key missing, remote denied, or no network; check `git fetch --tags origin` output and SSH config.
 - Checkout failed: local changes prevent checkout; ensure working copy is clean (converge and updater assume no local edits).
 - Systemd start failed: `systemctl start converge.service` requires the sudoers entry for `airplay` on the device.
+
+## Updater cannot start converge (Access denied)
+- Cause: update.service runs as 'airplay' and system units require root or policy.
+- Fix: updater uses 'sudo systemctl …' and sudoers must include the exact path (/usr/bin/systemctl). Validate with `visudo -cf /etc/sudoers.d/airplay-wyse`.
+- See also: systemd exit 203/EXEC indicates non-executable or wrong interpreter for scripts.

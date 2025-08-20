@@ -86,7 +86,10 @@ main() {
   fi
 
   log "Starting converge.service"
-  systemctl start converge.service
+  if ! /usr/bin/sudo -n /usr/bin/systemctl start converge.service; then
+    log "Failed to start converge.service via sudo"
+    exit 4
+  fi
 
   write_last_update "$target_tag" 0
   log "Updater completed"
