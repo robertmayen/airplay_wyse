@@ -1,0 +1,61 @@
+# Runbook
+
+## Install (once per device)
+- Create user `airplay` and clone repo to `/opt/airplay_wyse`.
+- Install trusted GPG pubkeys under `/etc/airplay_wyse/trusted-gpg/`.
+- Install sudoers drop-in from `security/sudoers/airplay-wyse` via visudo validation.
+- Enable systemd units:
+  - `sudo install -m0644 systemd/converge.service /etc/systemd/system/`
+  - `sudo install -m0644 systemd/converge.timer /etc/systemd/system/`
+  - `sudo systemctl daemon-reload && sudo systemctl enable --now converge.timer`
+
+## Operations
+- Converge now: `sudo systemctl start converge.service`
+- Check status: `journalctl -u converge.service -n 100`
+- Health: `./bin/health`
+- Diagnostics: `./bin/diag`
+
+## Release
+- Bump `VERSION`, update `CHANGELOG.md`.
+- Create signed annotated tag `vX.Y.Z` and push.
+- Devices will verify and converge on the next timer tick.
+
+## Rollback
+- `./bin/rollback vX.Y.(Z-1)` (verifies tag then converges).
+
+## Hold/Kill-switch
+- Create `/etc/airplay_wyse/hold` to pause updates; converge exits with code 6.
+# Model A: non-root 'airplay' user with narrow sudoers — Quickstart
+
+This quickstart sets up `converge` to run as the non-root `airplay` user, using least-privilege escalation via a sudoers drop-in. It also covers installing the systemd unit and importing the maintainer GPG public key so signed tags can be verified on-device.
+
+Prereqs
+- A local user named `airplay` exists on the device.
+- This repo is installed under `/opt/airplay_wyse`.
+
+1) Install the systemd unit (documentation-only)
+- Copy the unit into place: `/etc/systemd/system/converge.service`
+- The unit runs as `User=airplay` with `WorkingDirectory=/opt/airplay_wyse` and `Type=oneshot`.
+- Then reload and enable:
+  - `sudo systemctl daemon-reload`
+  - `sudo systemctl enable converge.service`
+  - `sudo systemctl start converge.service`
+
+2) Install sudoers drop-in for least-privilege
+- Copy `security/sudoers/airplay-wyse` to `/etc/sudoers.d/airplay-wyse`.
+- Validate with visudo (never edit `/etc/sudoers` directly): `sudo visudo -cf /etc/sudoers.d/airplay-wyse`
+- The `bin/converge` script keeps its internal sudo calls as-is and relies on this scoped policy.
+
+3) Import maintainer GPG public key for tag verification
+- Place the public key file on the device and import:
+  - `gpg --import /path/to/maintainers.pub`
+- Optional: set trust or import into the `airplay` user’s keyring as well if verification runs in that context.
+- Converge and release workflows assume tags are annotated and signed; the device must have the public key to verify.
+
+4) Run converge
+- As `airplay` (or via the unit): `systemctl start converge.service`
+- Converge will verify the target git tag before acting. If verification fails, it exits with code 5 (verify_failed).
+
+Notes
+- Working directory is `/opt/airplay_wyse` by default.
+- Keep the sudoers policy as narrow as possible and validate with `visudo -cf`.

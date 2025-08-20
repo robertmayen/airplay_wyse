@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "== Systemd units =="
+systemctl --no-pager --full status nqptp.service shairport-sync.service avahi-daemon.service || true
+
+echo "\n== Network/mDNS interfaces =="
+ip -brief addr || true
+systemctl --no-pager --full status avahi-daemon.service || true
+
+echo "\n== Avahi browse (local) =="
+if command -v avahi-browse >/dev/null; then
+  avahi-browse -rt _airplay._tcp || true
+  avahi-browse -rt _raop._tcp || true
+else
+  echo "avahi-browse not installed"
+fi
+
+echo "\n== nqptp logs (recent) =="
+journalctl -u nqptp --since "-15min" --no-pager || true
+
+echo "\n== shairport-sync logs (recent) =="
+journalctl -u shairport-sync --since "-15min" --no-pager || true
+
+echo "\n== ALSA devices =="
+aplay -l || true
+arecord -l || true

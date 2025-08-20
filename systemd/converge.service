@@ -1,0 +1,30 @@
+[Unit]
+Description=AirPlay Wyse Converge
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/airplay_wyse/bin/converge
+SyslogIdentifier=airplay-wyse
+ProtectSystem=full
+ProtectHome=read-only
+ReadOnlyPaths=/
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+# Airplay Wyse Converge systemd unit
+[Unit]
+Description=Airplay Wyse Converge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=airplay
+WorkingDirectory=/opt/airplay_wyse
+ExecStart=/opt/airplay_wyse/bin/converge
+
+[Install]
+WantedBy=multi-user.target

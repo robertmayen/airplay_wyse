@@ -1,0 +1,19 @@
+# Validate with: visudo -cf /etc/sudoers.d/airplay-wyse
+
+User_Alias AIRPLAY = airplay
+Cmnd_Alias AIRPLAY_APT = /usr/bin/apt-get update, /usr/bin/apt-get install *
+Cmnd_Alias AIRPLAY_DPKG = /usr/bin/dpkg -i /opt/airplay_wyse/pkg/artifacts/*
+Cmnd_Alias AIRPLAY_SYS = /bin/systemctl daemon-reload, /bin/systemctl enable *, /bin/systemctl start *, /bin/systemctl restart *, /bin/systemctl try-restart *, /bin/systemctl is-active *, /bin/systemctl show *
+Cmnd_Alias AIRPLAY_FS = /usr/bin/install *, /usr/bin/tee *
+Cmnd_Alias AIRPLAY_GIT = /usr/bin/git *
+
+AIRPLAY ALL=(root) NOPASSWD: AIRPLAY_APT, AIRPLAY_DPKG, AIRPLAY_SYS, AIRPLAY_FS, AIRPLAY_GIT
+# This file must be installed under /etc/sudoers.d via visudo -cf; do NOT edit /etc/sudoers directly.
+
+# Scoped commands allowed for 'airplay' (least privilege). Adjust as needed for your environment.
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl start converge.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl stop converge.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart converge.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl status converge.service
+airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable converge.service

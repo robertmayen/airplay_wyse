@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# AirPlay Wyse converge orchestrator (idempotent skeleton)
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+STATE_DIR="/var/lib/airplay_wyse"
+RUN_DIR="/run/airplay_wyse"
+ETC_DIR="/etc/airplay_wyse"
+
+EXIT_OK=0
+EXIT_CHANGED=2
+EXIT_DEGRADED=3
+EXIT_INV=4
+EXIT_VERIFY=5
+EXIT_HELD=6
+EXIT_PKG=10
+EXIT_SYSTEMD=11
+
+log() { echo "$(date --iso-8601=seconds) [converge] $*"; }
+fail() { log "ERROR: $*"; exit 1; }
+
+ensure_dirs() {
+  sudo install -d -m 0755 "$STATE_DIR" "$RUN_DIR" "$ETC_DIR" || true
+  sudo install -d -m 0700 "$STATE_DIR/hashes" || true
+}
+
+emit_health() {
+  local status="$1" code="$2" reason="$3"
+  local json
+  json=$(jq -n --arg status "$status" --arg reason "$reason" --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" '{status:$status, reason:$reason, version:$version, ts: now|tojson}') || json="{}"
+  printf "%s\n" "$json" | sudo tee "$STATE_DIR/last-health.json" >/dev/null || true
+  echo "status=$status code=$code reason=$reason" | sudo tee "$STATE_DIR/last-health.txt" >/dev/null || true
+  return "$code"
+}
+
+host_key() {
+  hostname -s | tr '[:upper:]' '[:lower:]'
+}
+
+verify_signed_tag() {
+  # Best-effort verification of current checkout being an annotated signed tag.
+  if ! command -v git >/dev/null; then
+    log "git not found; skipping verification"
+    return 0
+  fi
+  local tag
+  if ! tag=$(git -C "$REPO_DIR" describe --tags --exact-match 2>/dev/null); then
+    log "Not on a tag; verification failed"
+    return 1
+  fi
+  if ! git -C "$REPO_DIR" verify-tag "$tag" >/dev/null 2>&1; then
+    log "Tag $tag failed signature verification"
+    return 1
+  fi
+  log "Verified signed tag: $tag"
+  return 0
+}
+
+held_check() {
+  if [[ -f "$ETC_DIR/hold" || -f "$STATE_DIR/hold" ]]; then
+    emit_health "held" "$EXIT_HELD" "hold file present" >/dev/null || true
+    exit "$EXIT_HELD"
+  fi
+}
+
+load_inventory() {
+  local host=$(host_key)
+  local inv="$REPO_DIR/inventory/hosts/${host}.yml"
+  [[ -f "$inv" ]] || { log "inventory missing for host $host"; return 1; }
+  INVENTORY_FILE="$inv"
+}
+
+yaml_get() {
+  # very small helper to extract simple key: value (no nesting beyond one dot)
+  local key="$1"
+  grep -E "^${key}:[[:space:]]" "$INVENTORY_FILE" | sed -E "s/^${key}:[[:space:]]*//" | tr -d '"'
+}
+
+time_sync_ok() {
+  local ntp sys
+  ntp=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo no)
+  sys=$(timedatectl show -p SystemClockSynchronized --value 2>/dev/null || echo no)
+  [[ "$ntp" == "yes" || "$sys" == "yes" ]]
+}
+
+sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+
+render_template() {
+  # Simple placeholder replacement using envsubst-style variables
+  local src="$1" dst="$2"
+  local tmp
+  tmp=$(mktemp)
+  cp "$src" "$tmp"
+  sed -i "s/{{AIRPLAY_NAME}}/${AIRPLAY_NAME//\//\/}/g" "$tmp"
+  sed -i "s/{{ALSA_DEVICE}}/${ALSA_DEVICE//\//\/}/g" "$tmp"
+  sed -i "s/{{AVAHI_IFACE}}/${AVAHI_IFACE//\//\/}/g" "$tmp"
+  sudo install -m 0644 "$tmp" "$dst"
+  rm -f "$tmp"
+}
+
+needs_update() {
+  local file="$1" key="$2" cur new
+  new=$(sha256_file "$file")
+  cur=""
+  [[ -f "$STATE_DIR/hashes/$key" ]] && cur=$(cat "$STATE_DIR/hashes/$key")
+  if [[ "$new" != "$cur" ]]; then
+    echo "$new" | sudo tee "$STATE_DIR/hashes/$key" >/dev/null
+    return 0
+  fi
+  return 1
+}
+
+resolve_alsa_device() {
+  # Minimal resolver; prefer /dev/snd/by-id when present; fallback to plughw:<card>,<dev>
+  local vid pid serial devnum
+  vid=$(yaml_get 'alsa.vendor_id')
+  pid=$(yaml_get 'alsa.product_id')
+  serial=$(yaml_get 'alsa.serial' || true)
+  devnum=$(yaml_get 'alsa.device_num' || true)
+  devnum=${devnum:-0}
+
+  local byid target
+  byid="/dev/snd/by-id"
+  if [[ -d "$byid" ]]; then
+    for n in "$byid"/*; do
+      [[ -e "$n" ]] || continue
+      if [[ "$n" == *"_${vid}_${pid}"* ]] || [[ "$n" == *"${vid}:${pid}"* ]]; then
+        if [[ -z "$serial" || "$n" == *"${serial}"* ]]; then
+          target="$n"
+          break
+        fi
+      fi
+    done
+  fi
+  if [[ -n "${target:-}" ]]; then
+    ALSA_DEVICE="$target"
+    return 0
+  fi
+
+  # Fallback scan
+  for cpath in /sys/class/sound/card*/device; do
+    [[ -d "$cpath" ]] || continue
+    local udevdir="$(dirname "$cpath")/.."
+    if [[ -f "$udevdir/idVendor" && -f "$udevdir/idProduct" ]]; then
+      local fv fp fs
+      fv=$(cat "$udevdir/idVendor")
+      fp=$(cat "$udevdir/idProduct")
+      fs=$(cat "$udevdir/serial" 2>/dev/null || echo)
+      if [[ "0x$fv" == "$vid" && "0x$fp" == "$pid" ]]; then
+        if [[ -z "$serial" || "$fs" == "$serial" ]]; then
+          local card
+          card=$(basename "$(dirname "$cpath")")
+          card=${card#card}
+          ALSA_DEVICE="plughw:${card},${devnum}"
+          return 0
+        fi
+      fi
+    fi
+  done
+  return 1
+}
+
+apply_packages() {
+  if ! "$REPO_DIR/pkg/install.sh"; then
+    log "package install/update failed"
+    return 1
+  fi
+}
+
+apply_configs() {
+  local changed=0
+  AIRPLAY_NAME=$(yaml_get 'airplay_name')
+  AVAHI_IFACE=$(yaml_get 'nic')
+
+  if ! resolve_alsa_device; then
+    log "ALSA device not found for inventory selector"
+    return 2
+  fi
+
+  # shairport-sync
+  render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" \
+    "/etc/shairport-sync.conf"
+  if needs_update "/etc/shairport-sync.conf" shairport-sync.conf; then
+    changed=1
+    sudo systemctl try-restart shairport-sync.service || return 3
+  fi
+
+  # avahi iface restrict (optional)
+  if [[ -f "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" ]]; then
+    sudo install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
+    render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" \
+      "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"
+    if needs_update "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" avahi-iface.conf; then
+      changed=1
+      sudo systemctl try-restart avahi-daemon.service || return 3
+    fi
+  fi
+
+  return $changed
+}
+
+check_nqptp_health() {
+  # Skeleton: ensure active
+  if ! systemctl is-active --quiet nqptp.service; then
+    return 1
+  fi
+  return 0
+}
+
+check_avahi_raop() {
+  command -v avahi-browse >/dev/null || return 0
+  avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "${AIRPLAY_NAME}" || return 1
+  avahi-browse -rt _raop._tcp 2>/dev/null | grep -q "${AIRPLAY_NAME}" || return 1
+  return 0
+}
+
+main() {
+  ensure_dirs
+  held_check
+  if ! verify_signed_tag; then
+    emit_health "verify_failed" "$EXIT_VERIFY" "unsigned or invalid tag" >/dev/null || true
+    exit "$EXIT_VERIFY"
+  fi
+  if ! load_inventory; then
+    emit_health "invalid_inventory" "$EXIT_INV" "missing inventory file" >/dev/null || true
+    exit "$EXIT_INV"
+  fi
+  if ! time_sync_ok; then
+    emit_health "degraded" "$EXIT_DEGRADED" "time unsynced" >/dev/null || true
+    exit "$EXIT_DEGRADED"
+  fi
+
+  # Package ensure
+  if ! apply_packages; then
+    emit_health "pkg_failed" "$EXIT_PKG" "package install/update failed" >/dev/null || true
+    exit "$EXIT_PKG"
+  fi
+
+  # Ensure nqptp then shairport ordering
+  sudo systemctl enable nqptp.service shairport-sync.service avahi-daemon.service >/dev/null 2>&1 || true
+  sudo systemctl start nqptp.service >/dev/null 2>&1 || true
+
+  # Apply configs and possibly restart services
+  set +e
+  apply_configs
+  local cfg_rc=$?
+  set -e
+  if [[ $cfg_rc -eq 2 ]]; then
+    emit_health "degraded" "$EXIT_DEGRADED" "alsa device missing" >/dev/null || true
+    exit "$EXIT_DEGRADED"
+  elif [[ $cfg_rc -eq 3 ]]; then
+    emit_health "systemd_failed" "$EXIT_SYSTEMD" "service restart failed" >/dev/null || true
+    exit "$EXIT_SYSTEMD"
+  fi
+
+  # Health checks
+  if ! check_nqptp_health; then
+    emit_health "degraded" "$EXIT_DEGRADED" "nqptp not healthy" >/dev/null || true
+    exit "$EXIT_DEGRADED"
+  fi
+  if ! check_avahi_raop; then
+    emit_health "degraded" "$EXIT_DEGRADED" "avahi/raop not visible" >/dev/null || true
+    exit "$EXIT_DEGRADED"
+  fi
+
+  if [[ $cfg_rc -eq 1 ]]; then
+    emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied" >/dev/null || true
+    exit "$EXIT_CHANGED"
+  fi
+  emit_health "healthy" "$EXIT_OK" "no changes" >/dev/null || true
+  exit "$EXIT_OK"
+}
+
+main "$@"
