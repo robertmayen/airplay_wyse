@@ -48,7 +48,7 @@
   - `update.timer` → `update.service` runs `bin/update` to fetch/verify release tags.
   - `update-done.path` watches `/run/airplay/update.trigger` to start `converge.service`.
   - `converge.service` runs `bin/converge` (idempotent orchestrator) as `airplay` user.
-  - `converge-broker.path` watches `/run/airplay/queue` to trigger root `converge-broker`.
+- `converge-broker.path` watches `/run/airplay/queue` to trigger root `converge-broker`.
 
 ## System Logic
 - Update selection: `bin/update` fetches tags, picks `inventory/hosts/<host>.yml: target_tag` if set, else highest SemVer `vX.Y.Z`.
@@ -75,6 +75,106 @@
   - `0 OK`, `2 CHANGED`, `3 DEGRADED`, `4 INVALID_INPUT`, `5 VERIFY_FAILED`, `6 HELD`, `10 PKG_ISSUE`, `11 SYSTEMD_ERR`.
 - Health access: `./bin/health` prints last JSON; `./bin/diag` bundles recent logs and environment glimpses.
 
+## Architecture Diagram
+```
+ Controller (Mac)                                     Device (Wyse box)
+ ───────────────────────────────                      ─────────────────────────────────────────────────────
+ scripts/ops/seed-known-hosts.sh  ──────SSH──────▶   sshd  ───────────────────────────────────────────────
+ scripts/ops/provision-hosts.sh   ──────SSH──────▶   systemd: preflight.service, converge-broker.path     
+                                                     │
+                                                     │  update.timer → update.service → bin/update
+                                                     │            │
+                                                     │            └─ writes /run/airplay/update.trigger
+                                                     │                                 │
+                                                     └─────────── update-done.path ────┘
+                                                                 │
+                                                                 └─ starts converge.service → bin/converge (User=airplay)
+                                                                                 │
+                                                                                 ├─ renders cfg/*.tmpl → /etc/* (via sudo broker when needed)
+                                                                                 │
+                                                                                 ├─ ensures pkgs via pkg/install.sh (via broker)
+                                                                                 │
+                                                                                 ├─ writes /var/lib/airplay_wyse/last-health.*
+                                                                                 │
+                                                                                 └─ enqueues root ops: /run/airplay/queue/*.cmd
+                                                                                                   │
+                                                       converge-broker.path ─▶  converge-broker.service (User=root)
+                                                                                                   │
+                                                                                                   └─ executes allow-listed commands
+```
+
+## Detailed Component Responsibilities
+- `bin/update` (User=airplay):
+  - Fetches tags from origin, selects target tag (inventory override `target_tag` > highest stable `vX.Y.Z`).
+  - Verifies tag signature (`git verify-tag`); aborts on failure (no converge).
+  - On change, checks out `tags/<target>` and touches `/run/airplay/update.trigger`.
+
+- `bin/converge` (User=airplay, NNP, restricted writes):
+  - Guards: hold switch, clock/ntp sanity, inventory presence, tag verification (defense-in-depth).
+  - Inventory load: parses `inventory/hosts/$(hostname -s).yml` for `airplay_name`, `alsa.*`, `nic`, optional `target_tag`.
+  - Template rendering: substitutes `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{AVAHI_IFACE}}` into system configs.
+  - Package gating: calls `pkg/install.sh` via broker to ensure `shairport-sync`, `nqptp`, `avahi-*`, `jq` at minimum versions.
+  - Service management: requests safe restarts/enables through broker; never escalates directly.
+  - State/health: writes JSON and txt status; returns semantic exit codes for timers/ops.
+
+- `converge-broker` (User=root, oneshot):
+  - Watches `/run/airplay/queue` (via `.path` unit).
+  - Executes only allow-listed commands and arguments; everything else is denied and logged.
+
+## Systemd Units & Relationships
+- `update.timer`: periodic; runs `update.service` every 10min after boot; persistent across reboots.
+- `update.service`: oneshot; triggers converge via the path file by touching `update.trigger`.
+- `update-done.path`: PathChanged on `update.trigger`; starts `converge.service`.
+- `converge.service`: oneshot; core idempotent orchestration; `User=airplay` with restricted `ReadWritePaths`.
+- `converge-broker.path`: directory-not-empty watcher on `/run/airplay/queue`; starts root broker.
+- `converge-broker.service`: oneshot; executes queued root actions.
+- `preflight.service`: sanity checks (deps, sudo, dirs) during bring-up.
+
+## Inventory Schema (practical subset)
+- `airplay_name` (string): Friendly name advertised to AirPlay clients.
+- `nic` (string): Interface used by Avahi/NQPTP; example `enp3s0`.
+- `alsa.vendor_id` (hex), `alsa.product_id` (hex), `alsa.serial` (string, optional), `alsa.device_num` (int), `alsa.mixer` (string).
+- `target_tag` (string, optional): Forces a canary or pin on this host.
+
+## Queue Mechanics (Root Broker)
+- Enqueue file: `/run/airplay/queue/<ts>.<rand>.cmd` with a single shell line to execute.
+- Allowed patterns only:
+  - `/usr/bin/apt-get -y install <pkg>`
+  - `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/*.deb`
+  - `/usr/bin/systemctl restart airplay-*`
+- Result files:
+  - Success: `... .ok`
+  - Failure: `... .err` containing stderr; the `.cmd` is removed in all cases.
+
+## Security Considerations
+- Trust root: Devices must have maintainer GPG/SSH signing keys to verify tags; reject unverified releases.
+- Principle of least privilege: converge runs unprivileged with `NoNewPrivileges`, bounded capabilities, and strict filesystem protection.
+- Broker allow-list: Prefer additive allow-lists; review diffs to `converge-broker` and `systemd/*.path|*.service` carefully.
+- Sudo is not assumed: Controller-side provisioning ensures units and dirs exist even before deploying the repo.
+
+## Failure Modes & Recovery
+- Tag verify failed (exit 5): Inspect maintainer keys on device; run `bin/diag`; verify tag with `git verify-tag`.
+- Degraded converge (exit 3): Check `.err` files in `/run/airplay/queue`; journal for `converge` and `converge-broker`.
+- Package issues (exit 10): Validate apt pins and network; `pkg/install.sh` output.
+- Held (exit 6): Remove `/etc/airplay_wyse/hold` or `/var/lib/airplay_wyse/hold`.
+- Name/SSH trust: Run controller `scripts/ops/seed-known-hosts.sh` again to refresh host keys.
+
+## Observability
+- Logs: `journalctl -u update -u converge -u converge-broker`.
+- Health snapshot: `/var/lib/airplay_wyse/last-health.json` and `.txt`; `make health` convenience.
+- Diagnostics bundle: `./bin/diag` prints systemd status, sudoers glimpse, deps, and recent logs.
+
+## End-to-End Sequence (Happy Path)
+1) Controller provisions devices: users, dirs, minimal units (`scripts/ops/provision-hosts.sh`).
+2) Maintainer pushes signed tag `vX.Y.Z` to origin.
+3) `update.timer` fires → `update.service` runs `bin/update`.
+4) Device fetches tags, picks target, verifies signature, checks out tag if changed.
+5) `bin/update` touches `/run/airplay/update.trigger`.
+6) `update-done.path` reacts → starts `converge.service`.
+7) `bin/converge` reads inventory, renders configs, requests package ensures and restarts via queue.
+8) `converge-broker.path` triggers → broker executes allowed root commands.
+9) `bin/converge` writes health and exits with `0` or `2` if changes applied.
+
 ## Inventory & Templates
 - Host files: `inventory/hosts/<host>.yml` drive device behavior (AirPlay name, NIC, ALSA IDs, mixer, optional serial).
 - Templates: `cfg/shairport-sync.conf.tmpl`, `cfg/nqptp.conf.tmpl`, and Avahi stanzas render with variables like `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{AVAHI_IFACE}}`.
@@ -89,4 +189,3 @@
 - Run in a VM when testing host-affecting changes; `make vm-test` describes the flow.
 - Keep sudoers minimal (see `security/`); validate with `visudo -cf` before deploying.
 - For debugging service discovery, use `tests/avahi_browse.sh`; for timing/audio, check `tests/journal_parsers.sh`.
-
