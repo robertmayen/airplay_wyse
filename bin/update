@@ -37,25 +37,26 @@ has_wrapper() {
   [[ -x /usr/local/sbin/airplay-sd-run ]]
 }
 
-bootstrap_detect() {
-  local ok=0
-  if can_systemd_run_nopass; then
-    ok=1
+# Return 0 if bootstrap is needed, 1 if already configured
+bootstrap_needed() {
+  local need=0
+  if ! can_systemd_run_nopass; then
+    need=1
   fi
   if ! has_wrapper; then
-    ok=0
+    need=1
   fi
-  return $(( ok == 1 ? 0 : 1 ))
+  return $(( need == 1 ? 0 : 1 ))
 }
 
 bootstrap_execute() {
   # Attempt to install sudoers + wrapper. Prefer root, but try sudo -n as airplay.
   # Returns 0 on success, non-zero otherwise.
   if [[ $(id -u) -eq 0 ]]; then
-    log "Bootstrap: running root bootstrap script"
+    log "Bootstrap: executing $REPO_DIR/bin/bootstrap"
     "$REPO_DIR/bin/bootstrap" || return 1
   else
-    log "Bootstrap detection: sudo not configured or wrapper missing; performing bootstrap"
+    log "Bootstrap: executing $REPO_DIR/bin/bootstrap via sudo"
     if ! sudo -n "$REPO_DIR/bin/bootstrap"; then
       log "Bootstrap attempt via sudo failed (non-interactive)."
       log "Manual recovery required: run as root -> $REPO_DIR/bin/bootstrap"
@@ -63,7 +64,7 @@ bootstrap_execute() {
     fi
   fi
   # Revalidate
-  if bootstrap_detect; then
+  if ! bootstrap_needed; then
     log "Bootstrap validation: success"
     return 0
   fi
@@ -100,7 +101,8 @@ main() {
     if [[ $(id -u) -eq 0 ]]; then
       log "Updater invoked as root; performing bootstrap then re-exec as airplay"
       # Try bootstrap as root
-      if ! bootstrap_detect; then
+      if bootstrap_needed; then
+        log "Bootstrap detection: sudo not configured or wrapper missing; performing bootstrap"
         bootstrap_execute || true
       fi
       # Re-exec as airplay for normal flow
@@ -187,7 +189,9 @@ main() {
   sync_systemd_units
 
   # Bootstrap phase: ensure sudoers + wrapper are present for privileged transient actions
-  if ! bootstrap_detect; then
+  if bootstrap_needed; then
+    log "Bootstrap detection: sudo not configured or wrapper missing; performing bootstrap"
+    log "Bootstrap: executing $REPO_DIR/bin/bootstrap"
     if ! bootstrap_execute; then
       # Do not proceed to converge without privilege model; emit structured error and exit non-zero
       log "event=bootstrap_required status=failed reason='sudo_not_configured_or_wrapper_missing'"
