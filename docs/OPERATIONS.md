@@ -59,3 +59,9 @@ alsa:
 - No compilers/build toolchains are required on the host. Converge installs packages via APT; if a local `.deb` is present in the repo checkout, it may be installed by `converge` via `dpkg -i`.
 - Avahi drop-in template is provided and applied only if different from the current content.
 
+## Acceptance Checklist
+- `shairport-sync -V` contains `AirPlay2`.
+- `systemctl is-active nqptp` returns `active`.
+- `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp`.
+- `bin/alsa-probe` returns an ALSA device string and `aplay -D <device>` can open it (busy tolerated).
+- A second `bin/converge` run returns unchanged (idempotent).
