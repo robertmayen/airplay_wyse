@@ -463,6 +463,64 @@ has_airplay2_build() {
   echo "$v" | grep -Eqi 'AirPlay[[:space:]]*2|RAOP2' && return 0 || return 1
 }
 
+# Remediate missing RAOP2 capability (install/start nqptp; upgrade shairport-sync)
+remediate_raop2() {
+  local need=0 changed=0
+  if ! has_airplay2_build; then need=1; fi
+  if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then need=1; fi
+  if [[ $need -eq 0 ]]; then
+    echo 0; return 0
+  fi
+
+  log "RAOP2 remediation: desired_capability=RAOP2; attempting package and unit fixes"
+
+  # Try to install local .debs first (preferred rollout path)
+  local debs=()
+  local f
+  shopt -s nullglob
+  for f in "$REPO_DIR"/pkg/nqptp_*.deb "$REPO_DIR"/pkg/shairport-sync_*.deb; do
+    [[ -f "$f" ]] && debs+=("$f")
+  done
+  shopt -u nullglob
+  if [[ ${#debs[@]} -gt 0 ]]; then
+    systemd_run pkg-ensure -- \
+      "/usr/bin/dpkg -i ${debs[*]} || /usr/bin/apt-get -y -f install"
+    changed=1
+  else
+    # Fallback: try distro packages if available
+    if command -v apt-get >/dev/null 2>&1; then
+      systemd_run pkg-ensure -- \
+        "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y shairport-sync nqptp || true"
+      changed=1
+    fi
+  fi
+
+  # Ensure shairport-sync drop-in uses nqptp and units are (re)loaded
+  local ovsrc="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
+  if [[ -f "$ovsrc" ]]; then
+    systemd_run unit-write -- "/usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d"
+    systemd_run unit-write -- "/usr/bin/install -m 0644 '$ovsrc' /etc/systemd/system/shairport-sync.service.d/override.conf"
+    changed=1
+  fi
+
+  systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+  # Ensure nqptp enabled/started, then restart shairport-sync
+  systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service || true"
+  systemd_run svc-restart -- "/usr/bin/systemctl restart nqptp.service || /usr/bin/systemctl start nqptp.service"
+  systemd_run svc-restart -- "/usr/bin/systemctl restart shairport-sync.service || true"
+  changed=1
+
+  # Post-check
+  if systemctl is-active --quiet nqptp.service 2>/dev/null && has_airplay2_build; then
+    log "RAOP2 remediation successful: nqptp active and shairport-sync reports AirPlay 2"
+  else
+    log "RAOP2 remediation attempted but verification still failing"
+  fi
+
+  echo $changed
+  return 0
+}
+
 apply_configs() {
   local changed=0
   AIRPLAY_NAME=$(yaml_get 'airplay_name')
@@ -586,6 +644,12 @@ main() {
   ensure_nqptp_started || true
   sync_shairport_override || true
 
+  # RAOP2 capability remediation (packages + units) if needed
+  RAOP2_CHANGED=0
+  if out=$(remediate_raop2); then
+    if [[ "$out" -ge 1 ]]; then RAOP2_CHANGED=1; fi
+  fi
+
   # Apply configs and possibly restart services
   set +e
   apply_configs
@@ -601,7 +665,7 @@ main() {
 
   # If this run enqueued or applied changes, report CHANGED and skip
   # synchronous health checks (services may still be restarting).
-  if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 ]]; then
+  if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 || ${RAOP2_CHANGED:-0} -eq 1 ]]; then
     emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
     exit "$EXIT_CHANGED"
   fi

@@ -6,6 +6,7 @@ LAST_UPDATE_FILE="$STATE_DIR/last-update.txt"
 REPO_DIR="/opt/airplay_wyse"
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+SUPPRESS_TRAP_LOG=0
 
 write_last_update() {
   local ts target rc
@@ -56,8 +57,9 @@ main() {
   cd "$REPO_DIR"
   log "Updater starting in $PWD"
 
-  log "Fetching tags from origin"
-  git fetch --tags origin
+  # Fetch tags with pruning to ensure devices drop stale/moved tags
+  log "Running: git fetch --tags --force --prune --prune-tags origin"
+  git fetch --tags --force --prune --prune-tags origin
 
   # Prefer per-host inventory target_tag
   local inv="$REPO_DIR/inventory/hosts/$(short_host).yml"
@@ -73,6 +75,15 @@ main() {
     exit 1
   fi
   log "Target tag: $target_tag"
+
+  # Ensure selected tag exists after fetch; if not, emit a single structured error and exit non-zero
+  if ! git show-ref --verify --quiet "refs/tags/$target_tag"; then
+    # Structured single-line error suitable for journald parsing
+    log "event=update_error kind=tag_mismatch target_tag=$target_tag reason=missing_tag_after_fetch"
+    write_last_update "$target_tag" 1
+    SUPPRESS_TRAP_LOG=1
+    exit 1
+  fi
 
   # Optional GPG verification (disabled by default). Enable with AIRPLAY_VERIFY_TAGS=1
   # or by setting `verify_gpg: true` in the host inventory file.
@@ -125,5 +136,5 @@ main() {
   "$REPO_DIR/bin/converge" || true
 }
 
-trap 'rc=$?; if [[ $rc -ne 0 ]]; then log "Updater failed rc=$rc"; fi; exit $rc' EXIT
+trap 'rc=$?; if [[ $rc -ne 0 && ${SUPPRESS_TRAP_LOG:-0} -ne 1 ]]; then log "Updater failed rc=$rc"; fi; exit $rc' EXIT
 main "$@"

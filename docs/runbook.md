@@ -47,6 +47,17 @@
 - **Verification:** Check AP2 status with `shairport-sync -V | grep -E 'AirPlay 2|RAOP2'` and nqptp with `systemctl status nqptp`.
 - **Zero touch:** No manual steps required on devices — the broker installs packages and converge deploys configs and restarts services automatically.
 
+### RAOP2 Remediation Path
+- Health gate checks:
+  - `shairport-sync -V` must mention AirPlay 2/RAOP2/NQPTP.
+  - `systemctl is-active nqptp.service` must be `active`.
+- If either check fails, converge triggers remediation using transient units:
+  - `pkg-ensure`: installs `pkg/nqptp_*.deb` and `pkg/shairport-sync_*.deb` if present; otherwise attempts `apt-get install -y nqptp shairport-sync`.
+  - `unit-write`: installs the `shairport-sync` drop-in that orders after `nqptp`.
+  - `svc-restart`: `systemctl daemon-reload`, enable and (re)start `nqptp.service`, then restart `shairport-sync.service`.
+- Post-check verifies `nqptp` is active and `shairport-sync -V` reports AirPlay 2; if successful, health is `healthy_changed` for this run.
+- Networking: Ensure UDP ports 319 and 320 are allowed on the LAN; these are required for NQPTP time sync.
+
 ## Release
 - Bump `VERSION`, update `CHANGELOG.md`.
 - Create signed annotated tag `vX.Y.Z` and push.

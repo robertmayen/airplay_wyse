@@ -5,6 +5,12 @@
 - Not visible in AirPlay picker: verify Avahi adverts with `tests/avahi_browse.sh`.
 - ALSA device missing: check `aplay -l`; verify inventory vendor/product/serial.
 - Unintended restarts: check hashes in `/var/lib/airplay_wyse/hashes` and journal for diffs.
+
+## Converge failed → run ./bin/diag-converge
+- Use `./bin/diag-converge` to quickly inspect the converge unit and the last 150 log lines:
+  - Shows `systemctl status --no-pager converge.service`.
+  - Shows `journalctl -u converge.service -n 150 --no-pager`.
+  - No additional sudo is required beyond repo defaults.
 ## Signed tag verification failures
 
 - Symptom: converge exits with code 5 and status "verify_failed".
