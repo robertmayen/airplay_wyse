@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# alsa-probe: resolve an ALSA output device string hw:<card>,<device>
+# Preference: inventory overrides -> USB DACs -> first available playback
+# Exits non-zero if no playable device can be determined.
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+
+# Optional inventory
+host_short() { hostname -s 2>/dev/null || hostname; }
+INV="$REPO_DIR/inventory/hosts/$(host_short).yml"
+yaml_get() {
+  local key="$1"
+  [[ -f "$INV" ]] || { echo ""; return 0; }
+  grep -E "^${key}:[[:space:]]" "$INV" | sed -E "s/^${key}:[[:space:]]*//" | tr -d '"'
+}
+
+vid=$(yaml_get 'alsa.vendor_id' || true)
+pid=$(yaml_get 'alsa.product_id' || true)
+devnum=$(yaml_get 'alsa.device_num' || true)
+devnum=${devnum:-0}
+
+# If explicit hw:card,dev given (rare), accept it
+exp=$(yaml_get 'alsa.device' || true)
+if [[ -n "${exp:-}" ]]; then
+  echo "$exp"; exit 0
+fi
+
+# Helper: first playback device number for a card index
+first_playback_dev() {
+  local c="$1" d
+  for d in /proc/asound/card"$c"/pcm*p; do
+    [[ -e "$d" ]] || continue
+    d=$(basename "$d")
+    echo "${d#pcm}" | tr -d 'p'
+    return 0
+  done
+  return 1
+}
+
+# Prefer USB matching VID:PID
+if [[ -n "${vid:-}" && -n "${pid:-}" ]]; then
+  for cpath in /sys/class/sound/card*/device; do
+    [[ -d "$cpath" ]] || continue
+    local up
+    up="$(dirname "$cpath")/.."
+    if [[ -f "$up/idVendor" && -f "$up/idProduct" ]]; then
+      local V P
+      V=$(cat "$up/idVendor")
+      P=$(cat "$up/idProduct")
+      if [[ "0x$V" == "$vid" && "0x$P" == "$pid" ]]; then
+        card=$(basename "$(dirname "$cpath")"); card=${card#card}
+        if p=$(first_playback_dev "$card"); then
+          echo "hw:${card},${devnum:-$p}"; exit 0
+        fi
+      fi
+    fi
+  done
+fi
+
+# Next: any USB card
+for cdir in /sys/class/sound/card*; do
+  [[ -d "$cdir" ]] || continue
+  if udevadm info -q path -n "$cdir" 2>/dev/null | grep -qi usb || \
+     lsusb 1>/dev/null 2>&1; then
+    card=$(basename "$cdir"); card=${card#card}
+    if p=$(first_playback_dev "$card"); then
+      echo "hw:${card},${devnum:-$p}"; exit 0
+    fi
+  fi
+done
+
+# Fallback: first playback on any card
+for cdir in /sys/class/sound/card*; do
+  [[ -d "$cdir" ]] || continue
+  card=$(basename "$cdir"); card=${card#card}
+  if p=$(first_playback_dev "$card"); then
+    echo "hw:${card},${devnum:-$p}"; exit 0
+  fi
+done
+
+exit 1
+
