@@ -1,9 +1,0 @@
---- a/systemd/overrides/shairport-sync.service.d/override.conf
-+++ b/systemd/overrides/shairport-sync.service.d/override.conf
-@@ -1,5 +1,5 @@
- [Unit]
--Wants=nqptp.service
-+Requires=nqptp.service
- After=nqptp.service
- 
- [Service]

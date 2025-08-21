@@ -1,7 +1,0 @@
-# Managed by repo. Install via: visudo -cf /etc/sudoers.d/airplay-wyse
-# Hardened least-privilege: only allow the constrained systemd-run wrapper.
-
-Defaults:airplay !requiretty
-
-# Single entry point for privileged actions; wrapper enforces profiles + sandbox
-airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run *

@@ -1,7 +1,0 @@
-Package: avahi-daemon
-Pin: release a=stable
-Pin-Priority: 500
-
-Package: avahi-utils
-Pin: release a=stable
-Pin-Priority: 500
