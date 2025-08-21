@@ -53,7 +53,8 @@ case "$PROFILE" in
              --property=ReadWritePaths=/etc/apt \
              --property=ReadWritePaths=/opt/airplay_wyse/pkg \
              --property=ReadWritePaths=/tmp \
-             --property=ReadWritePaths=/var/tmp ) ;;
+             --property=ReadWritePaths=/var/tmp \
+             --property=ReadWritePaths=/run/airplay ) ;;
   svc-restart)
     : ;;
 esac

@@ -10,7 +10,10 @@ set -euo pipefail
 
 SRC_URL="https://github.com/mikebrady/shairport-sync"
 GIT_REF=""
-WORK_DIR="$(mktemp -d -p /var/tmp)"
+# Use writable temp location (Wyse has read-only /tmp and /var/tmp)
+TMPDIR="/run/airplay/tmp"
+mkdir -p "$TMPDIR" 2>/dev/null || true
+WORK_DIR="$(mktemp -d -p "$TMPDIR")"
 CLEAN=1
 INSTALL_DIRECT=0
 

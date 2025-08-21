@@ -13,7 +13,10 @@ set -euo pipefail
 #   via the broker using: /usr/bin/dpkg -i /opt/airplay_wyse/pkg/nqptp_*.deb
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
-WORK_DIR="$(mktemp -d -p /var/tmp)"
+# Use writable temp location (Wyse has read-only /tmp and /var/tmp)
+TMPDIR="/run/airplay/tmp"
+mkdir -p "$TMPDIR" 2>/dev/null || true
+WORK_DIR="$(mktemp -d -p "$TMPDIR")"
 SRC_URL="https://github.com/mikebrady/nqptp"
 GIT_REF=""
 CLEANUP=1

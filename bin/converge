@@ -7,6 +7,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 STATE_DIR="/var/lib/airplay_wyse"
 RUN_DIR="/run/airplay"
 ETC_DIR="/etc/airplay_wyse"
+TMPDIR="/run/airplay/tmp"
 
 EXIT_OK=0
 EXIT_CHANGED=2
@@ -106,7 +107,7 @@ bootstrap_sudo_config() {
     # Create sudoers drop-in
     mkdir -p /etc/sudoers.d || return $failed
     local sdfile=/etc/sudoers.d/airplay-wyse
-    local tmp; tmp=$(mktemp -p /var/tmp)
+    local tmp; tmp=$(mktemp -p "$TMPDIR")
     {
       echo "# AirPlay Wyse privilege model (NOPASSWD systemd-run for airplay)"
       echo "Defaults:airplay !requiretty"
@@ -151,6 +152,8 @@ ensure_dirs() {
   # State dir may be created by provisioning; create lazily if writable.
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   mkdir -p "$STATE_DIR/hashes" 2>/dev/null || true
+  # Create temp directory in writable location (Wyse has read-only /tmp and /var/tmp)
+  mkdir -p "$TMPDIR" 2>/dev/null || true
   : # no queue; transient privileged actions via systemd-run
 }
 
@@ -209,11 +212,11 @@ emit_health() {
   local status="$1" code="$2" reason="$3"
   local json
   json=$(jq -n --arg status "$status" --arg reason "$reason" --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" '{status:$status, reason:$reason, version:$version, ts: now|tojson}') || json="{}"
-  local tmpj; tmpj=$(mktemp -p /var/tmp)
+  local tmpj; tmpj=$(mktemp -p "$TMPDIR")
   printf "%s\n" "$json" >"$tmpj"
   install -m 0644 "$tmpj" "$STATE_DIR/last-health.json" 2>/dev/null || true
   rm -f "$tmpj"
-  local tmpt; tmpt=$(mktemp -p /var/tmp)
+  local tmpt; tmpt=$(mktemp -p "$TMPDIR")
   echo "status=$status code=$code reason=$reason" >"$tmpt"
   install -m 0644 "$tmpt" "$STATE_DIR/last-health.txt" 2>/dev/null || true
   rm -f "$tmpt"
@@ -301,7 +304,7 @@ render_template() {
   # Simple placeholder replacement using envsubst-style variables
   local src="$1" dst="$2"
   local tmp
-  tmp=$(mktemp -p /var/tmp)
+  tmp=$(mktemp -p "$TMPDIR")
   cp "$src" "$tmp"
   sed -i "s/{{AIRPLAY_NAME}}/${AIRPLAY_NAME//\//\/}/g" "$tmp"
   sed -i "s/{{ALSA_DEVICE}}/${ALSA_DEVICE//\//\/}/g" "$tmp"
@@ -318,7 +321,7 @@ needs_update() {
   cur=""
   [[ -f "$STATE_DIR/hashes/$key" ]] && cur=$(cat "$STATE_DIR/hashes/$key")
   if [[ "$new" != "$cur" ]]; then
-    local tmph; tmph=$(mktemp -p /var/tmp); echo "$new" >"$tmph"
+    local tmph; tmph=$(mktemp -p "$TMPDIR"); echo "$new" >"$tmph"
     install -m 0600 "$tmph" "$STATE_DIR/hashes/$key" 2>/dev/null || true
     rm -f "$tmph"
     return 0
@@ -371,7 +374,7 @@ resolve_alsa_device() {
     if ! command -v aplay >/dev/null 2>&1; then return 0; fi
     if systemctl is-active --quiet shairport-sync.service 2>/dev/null; then return 0; fi
     # Attempt a very short, silent open; tolerate busy/permission errors.
-    local err rc tf; tf=$(mktemp -p /var/tmp)
+    local err rc tf; tf=$(mktemp -p "$TMPDIR")
     set +e
     timeout 1 aplay -q -t raw -c 2 -f S16_LE -r 44100 -D "$dev" < /dev/zero 2>"$tf"
     rc=$?
@@ -793,7 +796,7 @@ apply_configs() {
   fi
 
   # shairport-sync (render into tmp and request a restart via transient unit if needed)
-  local tmp_ss; tmp_ss=$(mktemp -p /var/tmp)
+  local tmp_ss; tmp_ss=$(mktemp -p "$TMPDIR")
   render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
   if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
     systemd_run cfg-write -- "/usr/bin/install -m 0644 '$tmp_ss' /etc/shairport-sync.conf"
@@ -805,7 +808,7 @@ apply_configs() {
   # avahi iface restrict (optional)
   if [[ -f "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" ]]; then
     # Render to temp; copy + restart handled via broker if policy later allows.
-    local tmp_av; tmp_av=$(mktemp -p /var/tmp)
+    local tmp_av; tmp_av=$(mktemp -p "$TMPDIR")
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
     if [[ ! -d "/etc/avahi/avahi-daemon.conf.d" ]]; then
       systemd_run cfg-write -- "/usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d"

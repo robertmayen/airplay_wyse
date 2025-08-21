@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.16 - 2025-01-21
+### Fixed
+- **Critical**: Fixed read-only filesystem issues on Wyse thin clients
+- All temp file operations now use `/run/airplay/tmp` instead of read-only `/tmp` or `/var/tmp`
+- Added TMPDIR variable pointing to `/run/airplay/tmp` in bin/converge
+- Updated ensure_dirs() to create the writable temp directory
+- Modified all 8 mktemp calls in bin/converge to use $TMPDIR
+- Updated pkg/build-nqptp.sh to use /run/airplay/tmp for builds
+- Updated pkg/build-shairport-sync.sh to use /run/airplay/tmp for builds
+- Added /run/airplay to ReadWritePaths in scripts/airplay-sd-run for pkg-ensure profile
+
+### Impact
+- Resolves all "Read-only file system" errors on Wyse devices
+- Enables successful source builds on systems with read-only /tmp and /var/tmp
+- AirPlay 2 (RAOP2) support now works on Wyse thin clients
+
 ## v0.2.15 - 2025-01-21
 ### Fixed
 - **Critical**: Fixed REPO_DIR unbound variable error in pkg/install.sh by moving definition before first use
