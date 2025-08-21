@@ -100,6 +100,19 @@ main() {
     git checkout -f "tags/$target_tag"
   fi
 
+  # Ensure critical scripts are executable (defense-in-depth for filemode issues)
+  for f in \
+    "$REPO_DIR/bin/converge" \
+    "$REPO_DIR/bin/converge-broker" \
+    "$REPO_DIR/bin/preflight" \
+    "$REPO_DIR/bin/update" \
+    "$REPO_DIR/bin/diag" \
+    "$REPO_DIR/bin/health" \
+    "$REPO_DIR/bin/rollback" \
+    "$REPO_DIR/pkg/install.sh"; do
+    [[ -f "$f" ]] && chmod +x "$f" 2>/dev/null || true
+  done
+
   # Emit trigger for converge via path unit (no direct systemctl here)
   install -d -m 2775 -o root -g airplay /run/airplay || true
   : > /run/airplay/update.trigger
