@@ -27,8 +27,9 @@ install_sudoers() {
   install -d -m 0755 /etc/sudoers.d
   local tmp; tmp=$(mktemp)
   {
-    printf '# AirPlay Wyse privilege model (NOPASSWD systemd-run for airplay)\n'
+    printf '# AirPlay Wyse privilege model (NOPASSWD for constrained helpers)\n'
     printf 'Defaults:airplay !requiretty\n'
+    printf 'airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run\n'
     printf 'airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run\n'
   } >"$tmp"
   install -o root -g root -m 0440 "$tmp" "$sdfile"

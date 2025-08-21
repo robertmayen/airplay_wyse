@@ -54,10 +54,10 @@ bootstrap_execute() {
   # Returns 0 on success, non-zero otherwise.
   if [[ $(id -u) -eq 0 ]]; then
     log "Bootstrap: executing $REPO_DIR/bin/bootstrap"
-    "$REPO_DIR/bin/bootstrap" || return 1
+    /bin/bash -lc "$REPO_DIR/bin/bootstrap" || return 1
   else
     log "Bootstrap: executing $REPO_DIR/bin/bootstrap via sudo"
-    if ! sudo -n "$REPO_DIR/bin/bootstrap"; then
+    if ! sudo -n /bin/bash -lc "$REPO_DIR/bin/bootstrap"; then
       log "Bootstrap attempt via sudo failed (non-interactive)."
       log "Manual recovery required: run as root -> $REPO_DIR/bin/bootstrap"
       return 1
