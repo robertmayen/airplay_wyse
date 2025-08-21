@@ -20,11 +20,16 @@ QUEUE_DIR="/run/airplay/queue"
 mkdir -p "$QUEUE_DIR" 2>/dev/null || true
 
 # Ensure apt preferences directory via broker, then stage preference files via broker tee (with .in payloads)
+# Only enqueue writes when content differs or target file missing.
 ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
 printf '/usr/bin/install -d -m 0755 /etc/apt/preferences.d\n' >"$QUEUE_DIR/${ts}.${rand}.cmd"
 for pref in "$(dirname "$0")"/apt-pins.d/*.pref; do
   [[ -f "$pref" ]] || continue
   base=$(basename "$pref")
+  dest="/etc/apt/preferences.d/$base"
+  if [[ -f "$dest" ]] && cmp -s "$pref" "$dest"; then
+    continue
+  fi
   ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
   echo "/usr/bin/tee /etc/apt/preferences.d/$base" >"$QUEUE_DIR/${ts}.${rand}.cmd"
   cp "$pref" "$QUEUE_DIR/${ts}.${rand}.in"

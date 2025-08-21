@@ -201,10 +201,17 @@ resolve_alsa_device() {
 }
 
 apply_packages() {
-  if ! "$REPO_DIR/pkg/install.sh"; then
+  set +e
+  "$REPO_DIR/pkg/install.sh"
+  local rc=$?
+  set -e
+  # Treat 0 = no changes, 1 = changes enqueued as success. Any rc >=2 is failure.
+  if [[ $rc -ge 2 ]]; then
     log "package install/update failed"
-    return 1
+    return 2
   fi
+  PACKAGES_CHANGED=$rc
+  return 0
 }
 
 apply_configs() {
@@ -279,6 +286,7 @@ main() {
   fi
 
   # Package ensure
+  PACKAGES_CHANGED=0
   if ! apply_packages; then
     emit_health "pkg_failed" "$EXIT_PKG" "package install/update failed" >/dev/null || true
     exit "$EXIT_PKG"
@@ -309,7 +317,7 @@ main() {
     exit "$EXIT_DEGRADED"
   fi
 
-  if [[ $cfg_rc -eq 1 ]]; then
+  if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 ]]; then
     emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
     exit "$EXIT_CHANGED"
   fi
