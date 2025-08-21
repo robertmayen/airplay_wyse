@@ -32,28 +32,51 @@ bootstrap_diagnose() {
   local msgs=()
   local sudoers="/etc/sudoers.d/airplay-wyse"
   command -v sudo >/dev/null 2>&1 || msgs+=("sudo_missing")
-  # Only perform sudoers validations through privileged wrapper to avoid permission errors
-  if [[ -x /usr/local/sbin/airplay-sd-run ]]; then
-    sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- \
-      "/usr/sbin/visudo -cf '$sudoers'" >/dev/null 2>&1 || msgs+=("sudoers_invalid_syntax")
-    # Ownership and mode checks
-    local meta
-    meta=$(sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- \
-      "stat -c '%U:%G:%a' '$sudoers' 2>/dev/null || stat -f '%Su:%Sg:%Lp' '$sudoers' 2>/dev/null" 2>/dev/null || echo)
-    [[ "$meta" == root:root:440 ]] || msgs+=("sudoers_meta_incorrect")
+  
+  # Check if sudoers file exists first
+  if [[ ! -f "$sudoers" ]]; then
+    msgs+=("sudoers_file_missing")
   else
-    msgs+=("wrapper_missing")
-  fi
-  [[ -x /usr/local/sbin/airplay-sd-run ]] || msgs+=("wrapper_missing")
-  # Functional test result
-  if [[ "$(id -un)" == "airplay" ]]; then
-    sudo -n /usr/bin/systemd-run --wait --collect --unit "apw-selftest-$$" /bin/true >/dev/null 2>&1 || msgs+=("functional_check_failed")
-  else
-    if id -u airplay >/dev/null 2>&1; then
-      sudo -u airplay -n sudo -n /usr/bin/systemd-run --wait --collect --unit "apw-selftest-$$" /bin/true >/dev/null 2>&1 || msgs+=("functional_check_failed")
+    # Only perform sudoers validations through privileged wrapper to avoid permission errors
+    if [[ -x /usr/local/sbin/airplay-sd-run ]]; then
+      # Try wrapper-based validation first
+      if ! sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- \
+        "/usr/sbin/visudo -cf '$sudoers'" >/dev/null 2>&1; then
+        msgs+=("sudoers_invalid_syntax")
+      fi
+      # Ownership and mode checks
+      local meta
+      meta=$(sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- \
+        "stat -c '%U:%G:%a' '$sudoers' 2>/dev/null || stat -f '%Su:%Sg:%Lp' '$sudoers' 2>/dev/null" 2>/dev/null || echo)
+      [[ "$meta" == root:root:440 ]] || msgs+=("sudoers_meta_incorrect")
     else
-      msgs+=("functional_check_failed")
+      # Fallback: try direct sudo validation if wrapper missing
+      if command -v visudo >/dev/null 2>&1; then
+        if ! sudo -n visudo -cf "$sudoers" >/dev/null 2>&1; then
+          msgs+=("sudoers_invalid_syntax")
+        fi
+      fi
+      msgs+=("wrapper_missing")
     fi
   fi
+  
+  [[ -x /usr/local/sbin/airplay-sd-run ]] || msgs+=("wrapper_missing")
+  
+  # Functional test result with better error handling
+  local functional_ok=0
+  if [[ "$(id -un)" == "airplay" ]]; then
+    if sudo -n /usr/bin/systemd-run --wait --collect --unit "apw-selftest-$$" /bin/true >/dev/null 2>&1; then
+      functional_ok=1
+    fi
+  else
+    if id -u airplay >/dev/null 2>&1; then
+      if sudo -u airplay -n sudo -n /usr/bin/systemd-run --wait --collect --unit "apw-selftest-$$" /bin/true >/dev/null 2>&1; then
+        functional_ok=1
+      fi
+    fi
+  fi
+  
+  [[ $functional_ok -eq 1 ]] || msgs+=("functional_check_failed")
+  
   echo "${msgs[*]:-}" | sed 's/ /;/g'
 }

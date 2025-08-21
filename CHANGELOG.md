@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.3.0 - 2025-08-21
+### Major - Repository-Level Bootstrap Fixes
+- **Breaking**: Replaced runtime shell patches with permanent repository-level fixes
+- Enhanced systemd override configuration with comprehensive permissions
+- Improved bootstrap error handling and diagnostics in lib/bootstrap.sh
+- Enhanced converge script with better logging and validation
+- Added comprehensive documentation and test validation
+
+### systemd Service Improvements
+- Added ReadOnlyPaths=/etc/sudoers.d for proper sudoers file access
+- Relaxed sandbox restrictions (PrivateDevices=no, ProtectSystem=no, etc.)
+- Added necessary ReadWritePaths for state directories (/var/lib/airplay_wyse, /run/airplay, /tmp)
+- Enabled network access with PrivateNetwork=no for package operations
+- Set environment variables for non-interactive operations (DEBIAN_FRONTEND, etc.)
+
+### Bootstrap Logic Enhancements
+- Added explicit sudoers file existence checks before validation
+- Enhanced bootstrap_diagnose() with detailed error categorization
+- Added fallback validation methods when airplay-sd-run wrapper is missing
+- Improved functional test error handling with better diagnostics
+- Enhanced logging in bootstrap_sudo_config() with step-by-step feedback
+
+### Documentation & Testing
+- Added docs/bootstrap-fixes.md with comprehensive migration guide
+- Created test_bootstrap_fixes.sh for validation of all fixes
+- Added BOOTSTRAP_FIXES_SUMMARY.md with deployment instructions
+- Documented error categories and troubleshooting procedures
+
+### Deprecated Shell Scripts
+- fix_bootstrap_check.sh - Replaced by enhanced lib/bootstrap.sh
+- fix_converge_permissions.sh - Replaced by systemd override
+- fix_converge_local.sh - Replaced by systemd override  
+- fix_airplay_converge.sh - Replaced by integrated repository fixes
+
+### Impact
+- Eliminates need for runtime shell patches and manual interventions
+- Provides consistent, maintainable solution across all deployments
+- Better error diagnostics and troubleshooting capabilities
+- Self-documenting with comprehensive test validation
+
 ## v0.2.17 - 2025-08-21
 ### Fixed
 - **Critical**: Fixed converge service bootstrap validation failures on properly configured systems
