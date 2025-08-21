@@ -463,32 +463,22 @@ nqptp_installed() {
   systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"
 }
 
-# Removed build/install-from-source helpers (immutable-ish hosts). APT-only, optional local .deb.
+# Removed build/install-from-source helpers (immutable-ish hosts). APT-only.
 
-ensure_packages_minimal() {
+ensure_ap2_packages() {
   local did_update=0 changed=0
-  apt_update_if_needed() { if [[ $did_update -eq 0 ]]; then systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true" || return 2; did_update=1; fi; }
-  ensure_pkg() { dpkg -s "$1" >/dev/null 2>&1 || { apt_update_if_needed || return 2; systemd_run pkg-ensure -- "/usr/bin/apt-get -y install $1" || return 2; changed=1; }; }
+  apt_update() { if [[ $did_update -eq 0 ]]; then systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true" || return 100; did_update=1; fi; }
+  ensure_pkg() { dpkg -s "$1" >/dev/null 2>&1 || { apt_update || return 100; systemd_run pkg-ensure -- "/usr/bin/apt-get -y install $1" || return 100; changed=1; }; }
 
-  ensure_pkg shairport-sync || return 2
-  ensure_pkg avahi-daemon || return 2
-  ensure_pkg avahi-utils || return 2
-  ensure_pkg jq || return 2
-  ensure_pkg alsa-utils || return 2
-  ensure_pkg nqptp || true
+  ensure_pkg shairport-sync || return 100
+  ensure_pkg nqptp || return 100
+  ensure_pkg avahi-daemon || return 100
+  ensure_pkg avahi-utils || return 100
+  ensure_pkg jq || return 100
+  ensure_pkg alsa-utils || return 100
 
-  # Optional upgrade of shairport-sync from local .deb if lacking AirPlay2
-  if command -v shairport-sync >/dev/null 2>&1; then
-    if ! shairport-sync -V 2>&1 | grep -q "AirPlay2"; then
-      shopt -s nullglob
-      local debs=("$REPO_DIR"/shairport-sync_*.deb)
-      if (( ${#debs[@]} )); then
-        systemd_run pkg-ensure -- "/usr/bin/dpkg -i '${debs[0]}'" || return 2
-        changed=1
-      fi
-      shopt -u nullglob
-    fi
-  fi
+  if ! command -v shairport-sync >/dev/null 2>&1; then return 100; fi
+  if ! shairport-sync -V 2>&1 | grep -q "AirPlay2"; then return 100; fi
 
   echo $changed
   return 0
@@ -504,10 +494,16 @@ remediate_raop2() {
     changed=1
   fi
   systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
-  systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service || true"
-  systemd_run svc-restart -- "/usr/bin/systemctl restart nqptp.service || /usr/bin/systemctl start nqptp.service"
+  if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
+    systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service || true"
+    systemd_run svc-restart -- "/usr/bin/systemctl start nqptp.service || true"
+    changed=1
+  else
+    systemd_run svc-restart -- "/usr/bin/systemctl restart nqptp.service || true"
+    changed=1
+  fi
   systemd_run svc-restart -- "/usr/bin/systemctl restart shairport-sync.service || true"
-  echo 1
+  echo $changed
 }
 
 # Ensure AirPlay 2 (RAOP2) support by installing/activating nqptp and a RAOP2-capable shairport-sync
@@ -516,7 +512,10 @@ ensure_airplay2_support() {
   local changed=0
   log "Checking AirPlay 2 support status..."
   local pc
-  pc=$(ensure_packages_minimal) || return $EXIT_PKG
+  pc=$(ensure_ap2_packages || echo 100)
+  if [[ "$pc" == "100" ]]; then
+    return $EXIT_PKG
+  fi
   if [[ "$pc" -ne 0 ]]; then changed=1; fi
   local rc
   rc=$(remediate_raop2 || echo 0)
@@ -543,10 +542,13 @@ apply_configs() {
     AVAHI_IFACE=${AVAHI_IFACE:-eth0}
   fi
 
-  if ! resolve_alsa_device; then
-    log "ALSA device not found (auto-detect/override)"
+  # Probe ALSA device via helper
+  local probe_out
+  if ! probe_out=$("$REPO_DIR/bin/alsa-probe" 2>/dev/null); then
+    log "ALSA device not found"
     return 2
   fi
+  ALSA_DEVICE="$probe_out"
   resolve_alsa_mixer || true
 
   # Best-effort unmute and set a sensible volume on the chosen mixer
@@ -557,6 +559,9 @@ apply_configs() {
   # shairport-sync (render into tmp and request a restart via transient unit if needed)
   local tmp_ss; tmp_ss=$(mktemp -p "$TMPDIR")
   render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
+  if [[ -z "${ALSA_MIXER:-}" ]]; then
+    sed -i "/mixer_control_name/d" "$tmp_ss"
+  fi
   if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
     systemd_run cfg-write -- "/usr/bin/install -m 0644 '$tmp_ss' /etc/shairport-sync.conf"
     changed=1
