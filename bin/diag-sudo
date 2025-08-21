@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== EMERGENCY DIAGNOSTIC $(hostname -s) $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+echo "-- User account --"
+id airplay || true
+getent passwd airplay || true
+echo "Groups (airplay):"; id -nG airplay 2>/dev/null || true
+echo "-- Groups --"
+getent group sudo || echo "no sudo group"
+getent group wheel || echo "no wheel group"
+echo "-- Sudoers drop-ins --"
+ls -la /etc/sudoers.d 2>/dev/null || true
+echo "-- airplay-wyse sudoers --"
+if [[ -f /etc/sudoers.d/airplay-wyse ]]; then
+  stat /etc/sudoers.d/airplay-wyse 2>/dev/null || true
+  cat /etc/sudoers.d/airplay-wyse || true
+  if command -v visudo >/dev/null 2>&1; then visudo -cf /etc/sudoers.d/airplay-wyse || true; fi
+else
+  echo "no /etc/sudoers.d/airplay-wyse"
+fi
+echo "-- sudo include check --"
+grep -E '^[^#]*includedir\s+/etc/sudoers\.d' /etc/sudoers 2>/dev/null || echo "sudoers.d include missing in /etc/sudoers"
+echo "-- Sudo tests --"
+sudo -u airplay -n whoami 2>&1 | sed 's/^/[whoami] /'
+sudo -u airplay -n sudo -n whoami 2>&1 | sed 's/^/[sudo whoami] /'
+sudo -u airplay -n sudo -n /usr/bin/systemd-run --version 2>&1 | sed 's/^/[sudo systemd-run] /'
+sudo -u airplay -n sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- /bin/true 2>&1 | sed 's/^/[sudo wrapper] /' || true
+echo "-- Wrapper --"
+ls -la /usr/local/sbin/airplay-sd-run 2>/dev/null || echo "no wrapper"
+echo "-- Bootstrap logs --"
+cat /var/log/airplay-bootstrap.log 2>/dev/null || echo "no bootstrap log"
+echo "=== END DIAGNOSTIC ==="
+

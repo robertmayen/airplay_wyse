@@ -24,6 +24,25 @@ write_last_update() {
 sync_systemd_units() { :; }
 
 # --- Bootstrap helpers (sudoers + wrapper) ---
+force_bootstrap() {
+  [[ "${AIRPLAY_FORCE_BOOTSTRAP:-}" == "1" ]] && return 0 || return 1
+}
+
+check_sudo_group() {
+  id -nG airplay 2>/dev/null | tr ' ' '\n' | grep -Eq '^(sudo|wheel)$'
+}
+
+check_sudoers_file() {
+  [[ -f /etc/sudoers.d/airplay-wyse ]] && {
+    if command -v visudo >/dev/null 2>&1; then visudo -cf /etc/sudoers.d/airplay-wyse >/dev/null 2>&1; else return 0; fi
+  }
+}
+
+check_wrapper() { [[ -x /usr/local/sbin/airplay-sd-run ]]; }
+
+check_sudo_access() {
+  sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1
+}
 can_systemd_run_nopass() {
   # Test whether current context can run systemd-run without password
   if ! command -v sudo >/dev/null 2>&1; then
@@ -39,14 +58,19 @@ has_wrapper() {
 
 # Return 0 if bootstrap is needed, 1 if already configured
 bootstrap_needed() {
-  local need=0
-  if ! can_systemd_run_nopass; then
-    need=1
+  if force_bootstrap; then return 0; fi
+  local ok_group=1 ok_sudoers=1 ok_wrapper=1 ok_access=1
+  check_sudo_group && ok_group=0 || ok_group=1
+  check_sudoers_file && ok_sudoers=0 || ok_sudoers=1
+  check_wrapper && ok_wrapper=0 || ok_wrapper=1
+  check_sudo_access && ok_access=0 || ok_access=1
+  # Log details for debugging
+  log "Bootstrap detect: group=$((ok_group==0)) sudoers=$((ok_sudoers==0)) wrapper=$((ok_wrapper==0)) access=$((ok_access==0))"
+  # Need bootstrap if any check fails
+  if [[ $ok_group -ne 0 || $ok_sudoers -ne 0 || $ok_wrapper -ne 0 || $ok_access -ne 0 ]]; then
+    return 0
   fi
-  if ! has_wrapper; then
-    need=1
-  fi
-  return $(( need == 1 ? 0 : 1 ))
+  return 1
 }
 
 bootstrap_execute() {
