@@ -1,40 +1,346 @@
 # AirPlay Wyse
 
-GitOps-driven AirPlay for Wyse thin clients. Devices run a least‑privilege agent as the unprivileged `airplay` user; when root is required, the agent launches hardened transient units via a small, fixed wrapper. Releases are delivered by pushing annotated/signed git tags; devices fetch, select a target tag, and converge automatically.
+GitOps-driven AirPlay audio streaming for Wyse thin clients with automatic configuration, least-privilege security, and AirPlay 2 multi-room support.
 
-- Converge (user: `airplay`): renders configs, detects ALSA, applies templates, and performs scoped privileged actions via transient units.
-- Transient elevation: `/usr/local/sbin/airplay-sd-run <profile> -- <cmd>` maps to `systemd-run` with strict sandboxes and fixed `ReadWritePaths`.
-- Reconcile loop: `reconcile.timer` runs `bin/reconcile` which updates the repo and invokes converge.
+## 🚀 Quick Start
 
-See `docs/runbook.md` for operations and `AGENTS.md` for architecture.
+### What This Does
+Transforms Wyse thin clients into AirPlay receivers that:
+- Appear on your iPhone/Mac for wireless audio streaming
+- Support AirPlay 2 multi-room synchronization
+- Auto-detect and configure USB DACs or onboard audio
+- Self-update from git tags with zero manual intervention
+- Run securely with minimal privileges
 
-## Highlights
-- GitOps: push a tag; devices fetch → select → converge.
-- Least privilege: no arbitrary sudo; fixed capability profiles (`svc-restart`, `cfg-write`, `unit-write`, `pkg-ensure`).
-- Idempotent: only changed files/configs are applied; semantic exit codes with unit SuccessExitStatus.
-- ALSA auto‑detect: validates devices, finds a sensible mixer, unmute/80% volume.
-- AirPlay 2 (RAOP2): converge remediates missing AP2 automatically (installs/starts `nqptp`, upgrades shairport‑sync if needed, applies drop‑ins) using transient units.
+### Emergency Commands
+```bash
+# If something goes wrong:
+./bin/health                     # Check system status
+./bin/diag                       # Collect diagnostics
+sudo touch /etc/airplay_wyse/hold  # Stop all updates (kill switch)
+./bin/rollback v0.2.0            # Rollback to previous version
+```
 
-## Quick Start
-- Provision devices (controller scripts): `scripts/ops/provision-hosts.sh`
-- Tag a release: `git tag -s vX.Y.Z && git push --tags` (never retcon tags; bump for fixes)
-- Recommended: `reconcile.timer` drives updates and converge. Legacy `update.timer` is supported.
-- Health snapshot: `./bin/health`; logs: `journalctl -u reconcile.service -u converge.service`.
+## 📋 Prerequisites
 
-## AirPlay 2 Enablement
-- Build RAOP2-enabled package: `pkg/build-shairport-sync.sh` (Debian build host)
-- Build `nqptp`: `pkg/build-nqptp.sh` (if not in your distro)
-- Attach `.deb` files in `pkg/` to your release tag
-- Converge automatically installs packages, enables `nqptp`, and enforces service ordering
-- Verify: `shairport-sync -V | grep -Ei 'Air\s*Play\s*2|RAOP2|NQPTP'` and `systemctl status nqptp`
+- Wyse thin client running Debian/Ubuntu
+- Network connectivity (same subnet as your Apple devices)
+- SSH access for initial setup
+- Git repository access (GitHub deploy key)
 
-## Key Paths
-- Repo on device: `/opt/airplay_wyse`
-- State: `/var/lib/airplay_wyse` (hashes, last-health)
-- Configs: `/etc/shairport-sync.conf`, `/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf`
+## 🛠️ Installation
 
-## Docs
-- Operations: `docs/runbook.md`
-- Troubleshooting: `docs/troubleshooting.md`
-- Architecture and policies: `AGENTS.md`
-- Release policy: `docs/RELEASE.md`
+### Option A: Automated Provisioning (Recommended)
+
+From your controller machine (Mac/Linux):
+
+```bash
+# 1. Clone this repository
+git clone git@github.com:robertmayen/airplay_wyse.git
+cd airplay_wyse
+
+# 2. Configure device IPs
+export WYSE_DAC_IP="192.168.8.71"
+export WYSE_SONY_IP="192.168.8.72"
+
+# 3. Seed SSH keys (avoid host key warnings)
+scripts/ops/seed-known-hosts.sh \
+  wyse-dac=$WYSE_DAC_IP \
+  wyse-sony=$WYSE_SONY_IP
+
+# 4. Provision devices automatically
+SSH_USER=$USER scripts/ops/provision-hosts.sh \
+  wyse-dac=$WYSE_DAC_IP \
+  wyse-sony=$WYSE_SONY_IP
+```
+
+### Option B: Manual Installation
+
+On each Wyse device:
+
+```bash
+# 1. Create airplay user
+sudo useradd -m -s /bin/bash airplay
+sudo usermod -aG audio airplay
+
+# 2. Clone repository
+sudo mkdir -p /opt/airplay_wyse
+sudo chown airplay:airplay /opt/airplay_wyse
+sudo -u airplay git clone https://github.com/robertmayen/airplay_wyse.git /opt/airplay_wyse
+
+# 3. Install sudoers policy
+sudo cp /opt/airplay_wyse/security/sudoers/airplay-wyse /etc/sudoers.d/
+sudo visudo -cf /etc/sudoers.d/airplay-wyse
+
+# 4. Install privilege wrapper
+sudo cp /opt/airplay_wyse/scripts/airplay-sd-run /usr/local/sbin/
+sudo chmod 755 /usr/local/sbin/airplay-sd-run
+sudo chown root:root /usr/local/sbin/airplay-sd-run
+
+# 5. Install systemd units
+sudo cp /opt/airplay_wyse/systemd/reconcile.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now reconcile.timer
+
+# 6. Configure device inventory
+cd /opt/airplay_wyse
+cp inventory/hosts/wyse-dac.yml inventory/hosts/$(hostname -s).yml
+# Edit the file to match your device
+```
+
+## 🎵 Configuration
+
+### Basic Configuration
+
+Each device needs an inventory file at `inventory/hosts/$(hostname).yml`:
+
+```yaml
+# inventory/hosts/wyse-livingroom.yml
+airplay_name: "Living Room"     # Name shown in AirPlay picker
+nic: enp3s0                      # Network interface
+target_tag: null                 # null = use latest, or pin to specific version
+```
+
+### Advanced Audio Configuration
+
+For specific USB DACs:
+
+```yaml
+airplay_name: "HiFi System"
+nic: enp3s0
+alsa:
+  vendor_id: "0x08bb"           # USB vendor ID (from lsusb)
+  product_id: "0x2902"          # USB product ID
+  serial: "12345"               # Optional: specific device serial
+  device_num: 0                 # ALSA device number
+  mixer: "PCM"                  # Mixer control name
+```
+
+## 🚀 Deployment
+
+### Creating a Release
+
+```bash
+# 1. Update version
+echo "0.3.0" > VERSION
+
+# 2. Update changelog
+vim CHANGELOG.md  # Document changes
+
+# 3. Commit and tag
+git add -A
+git commit -m "Release v0.3.0: Description"
+git tag -s v0.3.0 -m "Release v0.3.0
+
+Changes:
+- Feature X
+- Bug fix Y
+
+Tested on: wyse-dac, wyse-sony"
+
+# 4. Push release
+git push origin main
+git push origin v0.3.0
+```
+
+Devices automatically pull and apply updates every 10 minutes.
+
+### Canary Deployments
+
+Test on one device before fleet-wide rollout:
+
+```bash
+# 1. Create canary tag
+git tag -s v0.3.0-canary -m "Canary: v0.3.0"
+git push origin v0.3.0-canary
+
+# 2. Pin canary device
+# In inventory/hosts/wyse-test.yml:
+target_tag: v0.3.0-canary
+
+# 3. Monitor for 24-48 hours
+ssh airplay@wyse-test
+journalctl -u reconcile -f
+
+# 4. Promote to production
+git tag -s v0.3.0 -m "Release v0.3.0"
+git push origin v0.3.0
+# Remove target_tag from canary device
+```
+
+## 🔍 Monitoring & Troubleshooting
+
+### Check System Health
+
+```bash
+# Quick health check
+./bin/health
+
+# Detailed diagnostics
+./bin/diag
+
+# View logs
+journalctl -u reconcile -n 100
+
+# Watch live logs
+journalctl -u reconcile -f
+```
+
+### Common Issues
+
+#### Device Not Visible in AirPlay
+
+```bash
+# Check if services are running
+systemctl status shairport-sync avahi-daemon nqptp
+
+# Verify network advertisements
+avahi-browse -rt _raop._tcp
+avahi-browse -rt _airplay._tcp
+
+# Check firewall (ports needed)
+# - 5353/udp (mDNS)
+# - 319-320/udp (NQPTP for AirPlay 2)
+# - 3689/tcp, 5000-5005/tcp (AirPlay)
+```
+
+#### No Audio Output
+
+```bash
+# Check audio devices
+aplay -l
+cat /proc/asound/cards
+
+# Test speakers
+speaker-test -c 2 -t wav
+
+# Check mixer settings
+alsamixer  # Look for muted channels (MM)
+
+# Force audio re-detection
+rm /var/lib/airplay_wyse/hashes/alsa-state
+sudo systemctl start reconcile
+```
+
+#### AirPlay 2 Not Working
+
+```bash
+# Verify AirPlay 2 support
+shairport-sync -V | grep -E "AirPlay 2|RAOP2|NQPTP"
+
+# Check NQPTP service
+systemctl status nqptp
+
+# Force rebuild if needed
+rm -rf /var/tmp/nqptp-build*
+sudo systemctl start reconcile
+```
+
+## 🏗️ Architecture
+
+### System Components
+
+```
+┌─────────────────┐
+│ reconcile.timer │──every 10min──►┌──────────────────┐
+└─────────────────┘                 │reconcile.service │
+                                    └──────────────────┘
+                                            │
+                                            ▼
+                                    ┌──────────────┐
+                                    │ bin/reconcile│
+                                    └──────────────┘
+                                            │
+                    ┌───────────────────────┴───────────────────────┐
+                    ▼                                               ▼
+            ┌──────────────┐                               ┌──────────────┐
+            │  bin/update  │                               │ bin/converge │
+            └──────────────┘                               └──────────────┘
+            (fetch & verify tags)                          (apply configs)
+                                                                   │
+                                                                   ▼
+                                                        ┌──────────────────┐
+                                                        │airplay-sd-run    │
+                                                        │(privilege wrapper)│
+                                                        └──────────────────┘
+```
+
+### Security Model
+
+- **Least Privilege**: Agent runs as unprivileged `airplay` user
+- **Controlled Escalation**: Fixed capability profiles via systemd-run
+- **No Direct Sudo**: Only specific actions through wrapper script
+- **Sandboxed Operations**: Each privileged action in isolated transient unit
+
+### Key Features
+
+- **GitOps Workflow**: Push tag → Devices auto-update
+- **AirPlay 2 Support**: Multi-room sync with NQPTP
+- **Auto-detection**: USB DACs preferred, fallback to onboard
+- **Self-healing**: Automatic package installation and service recovery
+- **Idempotent**: Only applies necessary changes
+- **Observable**: Comprehensive logging and health monitoring
+
+## 📚 Documentation
+
+- **[AGENTS.md](AGENTS.md)** - Complete operations and architecture guide
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** - Development workflow and coding guide
+- **[docs/runbook.md](docs/runbook.md)** - Operational procedures
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** - Problem-solving guide
+- **[GITOPS_IMPLEMENTATION.md](GITOPS_IMPLEMENTATION.md)** - GitOps architecture details
+- **[SOURCE_BUILD_FIXES.md](SOURCE_BUILD_FIXES.md)** - Build system documentation
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+make test
+
+# Check shell scripts
+shellcheck bin/*
+
+# Test converge (VM only!)
+./bin/converge --dry-run
+
+# Health check
+./bin/health
+```
+
+## 📁 Project Structure
+
+```
+airplay_wyse/
+├── bin/              # Core operational scripts
+├── cfg/              # Configuration templates
+├── docs/             # Documentation
+├── inventory/        # Per-device configuration
+├── pkg/              # Package building scripts
+├── scripts/          # Utility and provisioning scripts
+├── security/         # Security policies
+├── systemd/          # Service definitions
+└── tests/            # Test suite
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Test thoroughly in a VM
+4. Commit changes: `git commit -m 'feat: add amazing feature'`
+5. Push branch: `git push origin feature/amazing-feature`
+6. Open a Pull Request
+
+## 📝 License
+
+This project is maintained by Robert Mayen. See LICENSE file for details.
+
+## 🆘 Support
+
+- **Quick Help**: Run `./bin/diag` and share output
+- **Issues**: File via [GitHub Issues](https://github.com/robertmayen/airplay_wyse/issues)
+- **Logs**: `journalctl -u reconcile -n 500`
+- **Emergency**: See Quick Start section for recovery commands
+
+---
+
+**Remember**: Always test changes in a VM first! Production devices auto-update from git tags.

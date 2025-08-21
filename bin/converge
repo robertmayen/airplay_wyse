@@ -4,6 +4,8 @@ set -euo pipefail
 # AirPlay Wyse converge orchestrator (idempotent skeleton)
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+# shellcheck disable=SC1091
+. "$REPO_DIR/lib/bootstrap.sh" >/dev/null 2>&1 || true
 STATE_DIR="/var/lib/airplay_wyse"
 RUN_DIR="/run/airplay"
 ETC_DIR="/etc/airplay_wyse"
@@ -53,7 +55,13 @@ systemd_run() {
     pkg-ensure) props+=( --property=ReadWritePaths=/var/cache/apt --property=ReadWritePaths=/var/lib/apt \
                          --property=ReadWritePaths=/var/lib/dpkg --property=ReadWritePaths=/var/log \
                          --property=ReadWritePaths=/etc/apt --property=ReadWritePaths=/opt/airplay_wyse/pkg \
-                         --property=ReadWritePaths=/tmp --property=ReadWritePaths=/var/tmp ) ;;
+                         --property=ReadWritePaths=/tmp --property=ReadWritePaths=/var/tmp \
+                         --property=Environment=DEBIAN_FRONTEND=noninteractive \
+                         --property=Environment=APT_LISTCHANGES_FRONTEND=none \
+                         --property=Environment=NEEDRESTART_MODE=a \
+                         --property=After=network-online.target \
+                         --property=Wants=network-online.target \
+                         --property=WorkingDirectory=/opt/airplay_wyse ) ;;
     svc-restart) : ;;
   esac
   sudo /usr/bin/systemd-run "${props[@]}" /bin/bash -lc "$*"
@@ -211,7 +219,18 @@ sync_systemd_units() {
 emit_health() {
   local status="$1" code="$2" reason="$3"
   local json
-  json=$(jq -n --arg status "$status" --arg reason "$reason" --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" '{status:$status, reason:$reason, version:$version, ts: now|tojson}') || json="{}"
+  # Optional capability booleans (may be unset early)
+  local has_raop2_val=${HEALTH_RAOP2:-}
+  local nqptp_inst_val=${HEALTH_NQPTP_INSTALLED:-}
+  local nqptp_active_val=${HEALTH_NQPTP_ACTIVE:-}
+  json=$(jq -n \
+    --arg status "$status" \
+    --arg reason "$reason" \
+    --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" \
+    --argjson raop2 "${has_raop2_val:-null}" \
+    --argjson nqptp_installed "${nqptp_inst_val:-null}" \
+    --argjson nqptp_active "${nqptp_active_val:-null}" \
+    '{status:$status, reason:$reason, version:$version, shairport_has_raop2:$raop2, nqptp_installed:$nqptp_installed, nqptp_active:$nqptp_active, ts: now|tojson}') || json="{}"
   local tmpj; tmpj=$(mktemp -p "$TMPDIR")
   printf "%s\n" "$json" >"$tmpj"
   install -m 0644 "$tmpj" "$STATE_DIR/last-health.json" 2>/dev/null || true
@@ -565,6 +584,10 @@ has_raop2() { has_airplay2_build; }
 # nqptp activity check
 nqptp_active() { systemctl is-active --quiet nqptp.service 2>/dev/null; }
 
+nqptp_installed() {
+  systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"
+}
+
 # Install build dependencies for nqptp
 install_nqptp_build_deps() {
   log "Installing nqptp build dependencies"
@@ -866,17 +889,12 @@ check_avahi_raop() {
 converge_main() {
   ensure_dirs
 
-  # Phase 1: Bootstrap sudo configuration to enable transient root actions
-  local bsrc
-  set +e
-  bootstrap_sudo_config
-  bsrc=$?
-  set -e
-  if [[ $bsrc -eq 4 ]]; then
+  # Phase 1: Bootstrap check (single source of truth)
+  if ! is_bootstrapped; then
+    local reasons
+    reasons=$(bootstrap_diagnose || true)
+    log "event=bootstrap_missing category=bootstrap_missing reason='${reasons:-unknown}'"
     emit_health "bootstrap_required" "$EXIT_INV" "sudo NOPASSWD systemd-run not configured" >/dev/null || true
-    exit "$EXIT_INV"
-  elif [[ $bsrc -eq 1 ]]; then
-    emit_health "bootstrap_failed" "$EXIT_INV" "failed to configure sudoers/wrapper" >/dev/null || true
     exit "$EXIT_INV"
   fi
 
@@ -898,6 +916,7 @@ converge_main() {
   PACKAGES_CHANGED=0
   sync_systemd_units || true
   if ! apply_packages; then
+    log "event=pkg_error category=pkg_env_misconfigured summary='package install/update failed'"
     emit_health "pkg_failed" "$EXIT_PKG" "package install/update failed" >/dev/null || true
     exit "$EXIT_PKG"
   fi
@@ -939,6 +958,9 @@ converge_main() {
   fi
 
   # Health checks (only when no changes in this run)
+  HEALTH_RAOP2=$(has_raop2 && echo true || echo false)
+  HEALTH_NQPTP_INSTALLED=$(nqptp_installed && echo true || echo false)
+  HEALTH_NQPTP_ACTIVE=$(nqptp_active && echo true || echo false)
   if ! check_nqptp_health; then
     local note
     note=$(ptp_ports_busy_note || true)

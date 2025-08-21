@@ -1,17 +1,7 @@
-# Managed by repo. Install via visudo -f /etc/sudoers.d/airplay-wyse
-# Minimal rules to support converge v0.1.8 while keeping least privilege.
+# Managed by repo. Install via: visudo -cf /etc/sudoers.d/airplay-wyse
+# Hardened least-privilege: only allow the constrained systemd-run wrapper.
 
-airplay ALL=(root) NOPASSWD: /usr/bin/install *
-airplay ALL=(root) NOPASSWD: /usr/bin/apt-get update
-airplay ALL=(root) NOPASSWD: /usr/bin/apt-get install *
+Defaults:airplay !requiretty
 
-# Service control for core daemons
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable nqptp.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable shairport-sync.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl enable avahi-daemon.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl start nqptp.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart shairport-sync.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart avahi-daemon.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl try-restart shairport-sync.service
-airplay ALL=(root) NOPASSWD: /usr/bin/systemctl try-restart avahi-daemon.service
-airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run
+# Single entry point for privileged actions; wrapper enforces profiles + sandbox
+airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run *

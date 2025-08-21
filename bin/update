@@ -23,81 +23,9 @@ write_last_update() {
 
 sync_systemd_units() { :; }
 
-# --- Bootstrap helpers (sudoers + wrapper) ---
-force_bootstrap() {
-  [[ "${AIRPLAY_FORCE_BOOTSTRAP:-}" == "1" ]] && return 0 || return 1
-}
-
-check_sudo_group() {
-  id -nG airplay 2>/dev/null | tr ' ' '\n' | grep -Eq '^(sudo|wheel)$'
-}
-
-check_sudoers_file() {
-  # Airplay cannot read visudo on strict perms; only check existence here
-  local f=/etc/sudoers.d/airplay-wyse
-  [[ -f "$f" ]]
-}
-
-check_wrapper() { [[ -x /usr/local/sbin/airplay-sd-run ]]; }
-
-check_sudo_access() {
-  # We are already running as airplay; do not nest sudo -u airplay
-  sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1 \
-    || sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- /bin/true >/dev/null 2>&1
-}
-can_systemd_run_nopass() {
-  # Test whether current context can run systemd-run without password
-  if ! command -v sudo >/dev/null 2>&1; then
-    return 1
-  fi
-  # Non-interactive sudo test
-  sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1
-}
-
-has_wrapper() {
-  [[ -x /usr/local/sbin/airplay-sd-run ]]
-}
-
-# Return 0 if bootstrap is needed, 1 if already configured
-bootstrap_needed() {
-  if force_bootstrap; then return 0; fi
-  local ok_group=1 ok_sudoers=1 ok_wrapper=1 ok_access=1
-  local rc
-  check_sudo_group; rc=$?; [[ $rc -eq 0 ]] && ok_group=0 || ok_group=1; log "DEBUG: check_sudo_group rc=$rc"
-  check_sudoers_file; rc=$?; [[ $rc -eq 0 ]] && ok_sudoers=0 || ok_sudoers=1; log "DEBUG: check_sudoers_file rc=$rc"
-  check_wrapper; rc=$?; [[ $rc -eq 0 ]] && ok_wrapper=0 || ok_wrapper=1; log "DEBUG: check_wrapper rc=$rc"
-  check_sudo_access; rc=$?; [[ $rc -eq 0 ]] && ok_access=0 || ok_access=1; log "DEBUG: check_sudo_access rc=$rc"
-  # Log details (1 means pass, 0 means fail)
-  log "Bootstrap detect: group=$((ok_group==0)) sudoers=$((ok_sudoers==0)) wrapper=$((ok_wrapper==0)) access=$((ok_access==0))"
-  # Need bootstrap if any check fails
-  if [[ $ok_group -ne 0 || $ok_sudoers -ne 0 || $ok_wrapper -ne 0 || $ok_access -ne 0 ]]; then
-    return 0
-  fi
-  return 1
-}
-
-bootstrap_execute() {
-  # Attempt to install sudoers + wrapper. Prefer root, but try sudo -n as airplay.
-  # Returns 0 on success, non-zero otherwise.
-  if [[ $(id -u) -eq 0 ]]; then
-    log "Bootstrap: executing $REPO_DIR/bin/bootstrap"
-    /bin/bash -lc "$REPO_DIR/bin/bootstrap" || return 1
-  else
-    log "Bootstrap: executing $REPO_DIR/bin/bootstrap via sudo"
-    if ! sudo -n /bin/bash -lc "$REPO_DIR/bin/bootstrap"; then
-      log "Bootstrap attempt via sudo failed (non-interactive)."
-      log "Manual recovery required: run as root -> $REPO_DIR/bin/bootstrap"
-      return 1
-    fi
-  fi
-  # Revalidate
-  if ! bootstrap_needed; then
-    log "Bootstrap validation: success"
-    return 0
-  fi
-  log "Bootstrap validation: failed"
-  return 1
-}
+# --- Unified bootstrap predicate ---
+# shellcheck disable=SC1091
+. "$REPO_DIR/lib/bootstrap.sh" >/dev/null 2>&1 || true
 
 yaml_get_target_tag() {
   local file=$1
@@ -217,18 +145,25 @@ main() {
   sync_systemd_units
 
   # Bootstrap phase: ensure sudoers + wrapper are present for privileged transient actions
-  if bootstrap_needed; then
-    log "Bootstrap detection: sudo not configured or wrapper missing; performing bootstrap"
+  if ! is_bootstrapped; then
+    log "Bootstrap detection: missing capability; attempting bootstrap"
     log "Bootstrap: executing $REPO_DIR/bin/bootstrap"
-    if ! bootstrap_execute; then
-      # Do not proceed to converge without privilege model; emit structured error and exit non-zero
-      log "event=bootstrap_required status=failed reason='sudo_not_configured_or_wrapper_missing'"
+    if [[ $(id -u) -eq 0 ]]; then
+      /bin/bash -lc "$REPO_DIR/bin/bootstrap" || true
+    else
+      sudo -n /bin/bash -lc "$REPO_DIR/bin/bootstrap" || true
+    fi
+    # Re-check and decide
+    if ! is_bootstrapped; then
+      local reasons
+      reasons=$(bootstrap_diagnose || true)
+      log "event=bootstrap_required status=failed reason='${reasons:-unknown}'"
       write_last_update "$target_tag" 1
       SUPPRESS_TRAP_LOG=1
       exit 1
     fi
   else
-    log "Bootstrap detection: already configured"
+    log "Bootstrap detection: already configured (functional)"
   fi
 
   # Package installs and unit sync handled by converge/reconcile.

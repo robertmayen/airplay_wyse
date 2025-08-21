@@ -20,6 +20,17 @@ REPO_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 
 changed=0
 systemd_run() { sudo /usr/local/sbin/airplay-sd-run pkg-ensure -- "$*"; }
+
+# Wrapper to run apt operations with structured error on failure
+apt_run() {
+  local stage="$1"; shift
+  local cmd="$*"
+  if ! systemd_run "$cmd"; then
+    # Emit a concise, structured summary for journald scraping; details live in the transient unit logs
+    echo "event=apt_error code=100 stage=${stage} cmd='${cmd}'" >&2
+    return 100
+  fi
+}
 did_update=0
 
 # Ensure apt preferences directory via broker, then stage preference files via broker tee (with .in payloads)
@@ -40,9 +51,11 @@ done
 for p in "${REQ_PKGS[@]}"; do
   if ! have "$p"; then
     if [[ $did_update -eq 0 ]]; then
-      systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1
+      apt_run update "/usr/bin/apt-get update" || return 2
+      changed=1; did_update=1
     fi
-    systemd_run "/usr/bin/apt-get -y install $p"; changed=1
+    apt_run install "/usr/bin/apt-get -y install $p" || return 2
+    changed=1
     continue
   fi
   inst_ver=$(ver "$p")
@@ -50,8 +63,8 @@ for p in "${REQ_PKGS[@]}"; do
   min_ver="${!min_var:-}"
   if [[ -n "$min_ver" ]]; then
     dpkg --compare-versions "$inst_ver" ge "$min_ver" || {
-      if [[ $did_update -eq 0 ]]; then systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1; fi
-      systemd_run "/usr/bin/apt-get -y install $p"; changed=1;
+      if [[ $did_update -eq 0 ]]; then apt_run update "/usr/bin/apt-get update" || return 2; changed=1; did_update=1; fi
+      apt_run install "/usr/bin/apt-get -y install $p" || return 2; changed=1;
     }
   fi
 done
@@ -73,8 +86,8 @@ for p in "${OPT_PKGS[@]}"; do
   fi
   cand=$(apt_candidate "$p" || echo none)
   if [[ -n "$cand" && "$cand" != "(none)" ]]; then
-    if [[ $did_update -eq 0 ]]; then systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1; fi
-    systemd_run "/usr/bin/apt-get -y install $p"; changed=1
+    if [[ $did_update -eq 0 ]]; then apt_run update "/usr/bin/apt-get update" || return 2; changed=1; did_update=1; fi
+    apt_run install "/usr/bin/apt-get -y install $p" || return 2; changed=1
   else
     # No APT candidate for optional package - prepare for source build
     echo "[INFO] Package $p not available in APT - will attempt source build if needed"
@@ -102,9 +115,7 @@ if [[ $need_build_deps -eq 1 ]]; then
   for dep in "${BUILD_DEPS[@]}"; do
     if ! have "$dep"; then
       echo "[INFO] Installing build dependency: $dep"
-      systemd_run "/usr/bin/apt-get -y install $dep" || {
-        echo "[WARN] Failed to install $dep - build may fail"
-      }
+      apt_run install "/usr/bin/apt-get -y install $dep" || echo "[WARN] Failed to install $dep - build may fail"
       changed=1
     fi
   done

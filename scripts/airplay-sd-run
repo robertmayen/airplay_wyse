@@ -54,7 +54,13 @@ case "$PROFILE" in
              --property=ReadWritePaths=/opt/airplay_wyse/pkg \
              --property=ReadWritePaths=/tmp \
              --property=ReadWritePaths=/var/tmp \
-             --property=ReadWritePaths=/run/airplay ) ;;
+             --property=ReadWritePaths=/run/airplay \
+             --property=Environment=DEBIAN_FRONTEND=noninteractive \
+             --property=Environment=APT_LISTCHANGES_FRONTEND=none \
+             --property=Environment=NEEDRESTART_MODE=a \
+             --property=After=network-online.target \
+             --property=Wants=network-online.target \
+             --property=WorkingDirectory=/opt/airplay_wyse ) ;;
   svc-restart)
     : ;;
 esac
