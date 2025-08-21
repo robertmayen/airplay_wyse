@@ -33,6 +33,23 @@ enqueue_cmd() {
 # If repo units differ from system copies, update them via broker (GitOps for units)
 sync_systemd_units() {
   local changed=0
+  # Bootstrap: runtime drop-in to expand broker's writable paths so it can later write /etc units
+  local dropdir="/run/systemd/system/converge-broker.service.d"
+  local dropfile="$dropdir/10-apt-and-units.conf"
+  # Create drop-in dir and write override via broker
+  local ts rand cmdf inf
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  echo "/usr/bin/install -d -m 0755 $dropdir" >"/run/airplay/queue/${ts}.${rand}.cmd"
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  cmdf="/run/airplay/queue/${ts}.${rand}.cmd"; inf="/run/airplay/queue/${ts}.${rand}.in"
+  cat >"$inf" <<'OVR'
+[Service]
+# allow apt caches and temp locations + units directory writes
+ReadWritePaths=/var/cache/apt /var/lib/apt /var/lib/dpkg /var/tmp /tmp /etc/apt/preferences.d /var/log/apt /var/log/dpkg /etc/systemd/system
+OVR
+  echo "/usr/bin/tee $dropfile" >"$cmdf"
+  changed=1
+
   for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
     [[ -f "$src" ]] || continue
     local base dest

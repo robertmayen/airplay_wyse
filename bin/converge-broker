@@ -33,14 +33,21 @@ is_allowed() {
       ;;
     /usr/bin/install)
       shift
-      # allow only creation of apt preferences dir
-      [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ] && [ "${4:-}" = "/etc/apt/preferences.d" ] && return 0 || true
+      # allow creation of apt preferences dir and runtime drop-in dir for broker overrides
+      if [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ]; then
+        case "${4:-}" in
+          /etc/apt/preferences.d) return 0 ;;
+          /run/systemd/system/converge-broker.service.d) return 0 ;;
+        esac
+      fi
+      return 1
       ;;
     /usr/bin/tee)
       shift
       # allow writing to apt preferences and specific systemd unit files
       case "${1:-}" in
         /etc/apt/preferences.d/*.pref) return 0 ;;
+        /run/systemd/system/converge-broker.service.d/*.conf) return 0 ;;
         /etc/systemd/system/converge-broker.service) return 0 ;;
         /etc/systemd/system/converge-broker.path) return 0 ;;
         /etc/systemd/system/converge.service) return 0 ;;

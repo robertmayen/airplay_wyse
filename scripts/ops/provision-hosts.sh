@@ -154,8 +154,8 @@ is_allowed() {
     /usr/bin/apt-get) shift; if [ "${1:-}" = "update" ]; then return 0; fi; [ "${1:-}" = "-y" ] && [ "${2:-}" = "install" ] && return 0 ;;
     /usr/bin/dpkg) shift; [ "${1:-}" = "-i" ] && [[ "${2:-}" == /opt/airplay_wyse/pkg/*.deb ]] && return 0 ;;
     /usr/bin/systemctl) shift; if [ "${1:-}" = "daemon-reload" ]; then return 0; fi; if [ "${1:-}" = "restart" ]; then case "${2:-}" in airplay-*) return 0 ;; converge-broker.path) return 0 ;; esac; fi ;;
-    /usr/bin/install) shift; [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ] && [ "${4:-}" = "/etc/apt/preferences.d" ] && return 0 ;;
-    /usr/bin/tee) shift; case "${1:-}" in /etc/apt/preferences.d/*.pref) return 0 ;; /etc/systemd/system/converge-broker.service) return 0 ;; /etc/systemd/system/converge-broker.path) return 0 ;; /etc/systemd/system/converge.service) return 0 ;; /etc/systemd/system/update.service) return 0 ;; /etc/systemd/system/update-done.path) return 0 ;; /etc/systemd/system/preflight.service) return 0 ;; esac ;;
+    /usr/bin/install) shift; if [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ]; then case "${4:-}" in /etc/apt/preferences.d) return 0 ;; /run/systemd/system/converge-broker.service.d) return 0 ;; esac; fi ;;
+    /usr/bin/tee) shift; case "${1:-}" in /etc/apt/preferences.d/*.pref) return 0 ;; /run/systemd/system/converge-broker.service.d/*.conf) return 0 ;; /etc/systemd/system/converge-broker.service) return 0 ;; /etc/systemd/system/converge-broker.path) return 0 ;; /etc/systemd/system/converge.service) return 0 ;; /etc/systemd/system/update.service) return 0 ;; /etc/systemd/system/update-done.path) return 0 ;; /etc/systemd/system/preflight.service) return 0 ;; esac ;;
   esac
   return 1
 }
