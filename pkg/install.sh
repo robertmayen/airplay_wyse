@@ -105,4 +105,17 @@ for deb in "$REPO_DIR"/pkg/nqptp_*.deb; do
   echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
 done
 
+# If a local shairport-sync .deb is provided, install/upgrade it via broker too
+for deb in "$REPO_DIR"/pkg/shairport-sync_*.deb; do
+  deb_ver=$(dpkg-deb -f "$deb" Version 2>/dev/null || echo "")
+  if have shairport-sync; then
+    inst_ver=$(ver shairport-sync)
+    if [[ -n "$deb_ver" ]] && dpkg --compare-versions "$inst_ver" ge "$deb_ver"; then
+      continue
+    fi
+  fi
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
+done
+
 exit $changed

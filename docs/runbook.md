@@ -30,6 +30,18 @@
   - `_raop`: `avahi-browse -rt _raop._tcp | grep "$(grep -E '^airplay_name\s*:' inventory/hosts/$(hostname -s).yml | awk -F: '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')"`
 - Converge renders and deploys `/etc/shairport-sync.conf` and an Avahi drop‑in when needed; it then restarts the wrapper units so adverts should appear shortly after converge.
 
+## ALSA Autodetect and Audio Sanity
+- Converge auto-detects audio devices with a preference for USB; it falls back to the first card with a playback PCM.
+- It validates candidates by briefly opening the PCM (silent stream for ~1s) to ensure the device is actually usable.
+- Mixer detection prefers common controls in order: `PCM`, `Master`, `Digital`, `Speaker`, `Headphone`, `Line Out`, `Line`, `Front`.
+- After selection, converge attempts a best‑effort unmute and sets the chosen control to 80%.
+- To force a specific device, set inventory overrides (`alsa.vendor_id`, `alsa.product_id`, optional `alsa.serial`, `alsa.device_num`, `alsa.mixer`).
+
+## AirPlay 2 Support
+- For best results and multi‑room sync, install `nqptp` (the installer will attempt it automatically if available, or from `pkg/nqptp_*.deb` in a release tag).
+- AirPlay 2 capable `shairport-sync` builds can be distributed GitOps‑style by attaching a `pkg/shairport-sync_*.deb` to a release tag; devices will install/upgrade it automatically.
+- No local manual steps are required — the broker installs packages and converge deploys configs and restarts services.
+
 ## Release
 - Bump `VERSION`, update `CHANGELOG.md`.
 - Create signed annotated tag `vX.Y.Z` and push.

@@ -223,6 +223,16 @@ resolve_alsa_device() {
     return 1
   }
 
+  # Simple helper: try to open a PCM for a very short time (silent zeroes)
+  try_open_device() {
+    local dev="$1"
+    if ! command -v aplay >/dev/null 2>&1; then
+      # If aplay is missing, assume success (pkg step should install it)
+      return 0
+    fi
+    timeout 1 aplay -q -t raw -c 2 -f S16_LE -r 44100 -D "$dev" < /dev/zero 2>/dev/null
+  }
+
   # 1) Inventory override (USB by VID:PID with optional serial)
   if [[ -n "${vid:-}" && -n "${pid:-}" ]]; then
     local byid target
@@ -260,7 +270,14 @@ resolve_alsa_device() {
           fi
         done
       fi
-      return 0
+      # Validate device open; try common forms if needed
+      local cand1="plughw:${ALSA_CARD},${devnum}"
+      local cand2="hw:${ALSA_CARD},${devnum}"
+      local cand3="default"
+      if try_open_device "$cand1"; then ALSA_DEVICE="$cand1"; return 0; fi
+      if try_open_device "$cand2"; then ALSA_DEVICE="$cand2"; return 0; fi
+      if try_open_device "$cand3"; then ALSA_DEVICE="$cand3"; return 0; fi
+      # Fall through to auto-detect below
     fi
     log "ALSA override VID:PID not found; falling back to auto-detect"
   fi
@@ -280,8 +297,13 @@ resolve_alsa_device() {
   done
   if [[ -n "${usb_candidate:-}" ]]; then
     ALSA_CARD="$usb_candidate"
-    ALSA_DEVICE="plughw:${ALSA_CARD},${usb_devnum}"
-    return 0
+    # Try preferred forms in order
+    local cand1="plughw:${ALSA_CARD},${usb_devnum}"
+    local cand2="hw:${ALSA_CARD},${usb_devnum}"
+    local cand3="default"
+    if try_open_device "$cand1"; then ALSA_DEVICE="$cand1"; return 0; fi
+    if try_open_device "$cand2"; then ALSA_DEVICE="$cand2"; return 0; fi
+    if try_open_device "$cand3"; then ALSA_DEVICE="$cand3"; return 0; fi
   fi
 
   # 3) Fallback — first card with playback (PCI/built-in)
@@ -291,8 +313,12 @@ resolve_alsa_device() {
     local pnum
     if pnum=$(first_playback_devnum_for_card "$cidx" 2>/dev/null); then
       ALSA_CARD="$cidx"
-      ALSA_DEVICE="plughw:${ALSA_CARD},${pnum}"
-      return 0
+      local cand1="plughw:${ALSA_CARD},${pnum}"
+      local cand2="hw:${ALSA_CARD},${pnum}"
+      local cand3="default"
+      if try_open_device "$cand1"; then ALSA_DEVICE="$cand1"; return 0; fi
+      if try_open_device "$cand2"; then ALSA_DEVICE="$cand2"; return 0; fi
+      if try_open_device "$cand3"; then ALSA_DEVICE="$cand3"; return 0; fi
     fi
   done
 
@@ -312,7 +338,7 @@ resolve_alsa_mixer() {
     local names
     names=$(amixer -c "$ALSA_CARD" scontrols 2>/dev/null | awk -F"'" '/Simple mixer control/ {print $2}') || names=""
     local cand
-    for cand in PCM Master Digital Speaker Headphone "Line Out"; do
+    for cand in PCM Master Digital Speaker Headphone "Line Out" Line Front; do
       if echo "$names" | grep -qx "$cand"; then
         ALSA_MIXER="$cand"; break
       fi
@@ -358,6 +384,11 @@ apply_configs() {
     return 2
   fi
   resolve_alsa_mixer || true
+
+  # Best-effort unmute and set a sensible volume on the chosen mixer
+  if command -v amixer >/dev/null 2>&1 && [[ -n "${ALSA_CARD:-}" && -n "${ALSA_MIXER:-}" ]]; then
+    amixer -c "$ALSA_CARD" sset "$ALSA_MIXER" 80% unmute >/dev/null 2>&1 || true
+  fi
 
   # shairport-sync (render into tmp and request a restart via broker if needed)
   local tmp_ss; tmp_ss=$(mktemp)
