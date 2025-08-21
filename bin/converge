@@ -373,6 +373,55 @@ apply_packages() {
   return 0
 }
 
+sync_shairport_override() {
+  # Ensure shairport-sync has an override to order after nqptp and tighten sandbox
+  local src="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
+  local changed=0
+  if [[ -f "$src" ]]; then
+    if [[ ! -d "/etc/systemd/system/shairport-sync.service.d" ]]; then
+      enqueue_cmd /usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
+      changed=1
+    fi
+    local dest="/etc/systemd/system/shairport-sync.service.d/override.conf"
+    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
+      local ts rand cmdf inf
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
+      inf="$QUEUE_DIR/${ts}.${rand}.in"
+      echo "/usr/bin/tee $dest" >"$cmdf"
+      cp "$src" "$inf"
+      changed=1
+    fi
+  fi
+  if [[ $changed -eq 1 ]]; then
+    enqueue_cmd /usr/bin/systemctl daemon-reload
+    enqueue_cmd /usr/bin/systemctl restart airplay-shairport
+  fi
+  return $changed
+}
+
+ensure_nqptp_started() {
+  # If nqptp service exists, ensure it's enabled and started via broker
+  if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+    # Enable if not enabled
+    if ! systemctl is-enabled --quiet nqptp.service 2>/dev/null; then
+      enqueue_cmd /usr/bin/systemctl enable nqptp.service
+    fi
+    # Start if not active
+    if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
+      enqueue_cmd /usr/bin/systemctl start nqptp.service
+    fi
+  fi
+}
+
+has_airplay2_build() {
+  # Best-effort detection: look for "AirPlay 2" or RAOP2 in version output
+  if ! command -v shairport-sync >/dev/null 2>&1; then return 1; fi
+  local v
+  v=$(shairport-sync -V 2>&1 || true)
+  echo "$v" | grep -Eqi 'AirPlay[[:space:]]*2|RAOP2' && return 0 || return 1
+}
+
 apply_configs() {
   local changed=0
   AIRPLAY_NAME=$(yaml_get 'airplay_name')
@@ -497,7 +546,9 @@ main() {
     exit "$EXIT_PKG"
   fi
 
-  # Enqueue service restarts as needed; enabling is intentionally left to provisioning or packages
+  # Ensure nqptp is enabled/started if present, and keep shairport override in sync
+  ensure_nqptp_started || true
+  sync_shairport_override || true
 
   # Apply configs and possibly restart services
   set +e
@@ -522,6 +573,10 @@ main() {
   # Health checks (only when no changes in this run)
   if ! check_nqptp_health; then
     emit_health "degraded" "$EXIT_DEGRADED" "nqptp not healthy" >/dev/null || true
+    exit "$EXIT_DEGRADED"
+  fi
+  if ! has_airplay2_build; then
+    emit_health "degraded" "$EXIT_DEGRADED" "shairport-sync missing AirPlay 2 (RAOP2)" >/dev/null || true
     exit "$EXIT_DEGRADED"
   fi
   if ! check_avahi_raop; then

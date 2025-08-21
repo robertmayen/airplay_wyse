@@ -38,8 +38,10 @@
 - To force a specific device, set inventory overrides (`alsa.vendor_id`, `alsa.product_id`, optional `alsa.serial`, `alsa.device_num`, `alsa.mixer`).
 
 ## AirPlay 2 Support
-- For best results and multi‑room sync, install `nqptp` (the installer will attempt it automatically if available, or from `pkg/nqptp_*.deb` in a release tag).
-- AirPlay 2 capable `shairport-sync` builds can be distributed GitOps‑style by attaching a `pkg/shairport-sync_*.deb` to a release tag; devices will install/upgrade it automatically.
+- Install `nqptp` for multi‑room sync. The converge path now enables/starts `nqptp.service` automatically when present and orders `shairport-sync` after it via a unit override.
+- The Debian `shairport-sync` package may not include AirPlay 2 (RAOP2). To enable AirPlay 2, attach a locally built `pkg/shairport-sync_*.deb` compiled with `--with-raop2` to a signed tag. Devices will install/upgrade it automatically during converge.
+- Helper: use `pkg/build-shairport-sync.sh` on a Debian build host to produce a RAOP2‑enabled `.deb`.
+- Health: if `shairport-sync` lacks AirPlay 2 support, converge marks the system degraded with reason `shairport-sync missing AirPlay 2 (RAOP2)`.
 - No local manual steps are required — the broker installs packages and converge deploys configs and restarts services.
 
 ## Release

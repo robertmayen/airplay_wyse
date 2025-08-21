@@ -49,6 +49,7 @@
   - `update-done.path` watches `/run/airplay/update.trigger` to start `converge.service`.
   - `converge.service` runs `bin/converge` (idempotent orchestrator) as `airplay` user.
 - `converge-broker.path` watches `/run/airplay/queue` to trigger root `converge-broker`.
+  - Wrapper units: `airplay-shairport.service` and `airplay-avahi.service` wrap safe restarts of `shairport-sync` and `avahi-daemon` and match the broker allow‑list.
 
 ## System Logic
 - Update selection: `bin/update` fetches tags, picks `inventory/hosts/<host>.yml: target_tag` if set, else highest SemVer `vX.Y.Z`.
@@ -56,7 +57,7 @@
 - Converge phases (high level):
   - Prechecks: held switch (`/etc|/var/lib/airplay_wyse/hold`), time sync check, signed tag verify.
   - Inventory: Load host file and derive variables (e.g., `AIRPLAY_NAME`, `AVAHI_IFACE`), with ALSA auto-detection and optional overrides.
-  - Templates: Render `cfg/*.tmpl` into `/etc/...` via `render_template` with safe placeholder substitution (`{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{ALSA_MIXER}}`, `{{AVAHI_IFACE}}`).
+  - Templates: Render `cfg/*.tmpl` into temporary files and deploy to `/etc/...` via broker tee with safe placeholder substitution (`{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{ALSA_MIXER}}`, `{{AVAHI_IFACE}}`).
   - Packages: Ensure required packages via `pkg/install.sh` (apt pins and min versions in `pkg/versions.sh`).
   - Services: Request restarts/enablement through the broker queue when root is required.
   - Health: Emit JSON/text status under `/var/lib/airplay_wyse/last-health.*` and exit with semantic codes.
@@ -67,6 +68,8 @@
   - `/usr/bin/apt-get -y install ...`
   - `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/*.deb`
   - `/usr/bin/systemctl restart airplay-*`
+  - `/usr/bin/tee` to controlled destinations: `/etc/shairport-sync.conf`, `/etc/avahi/avahi-daemon.conf.d/*.conf`, `/etc/systemd/system/*.service|*.path`, and runtime drop‑ins under `/run/systemd/system/.../*.conf`.
+  - `/usr/bin/install -d -m 0755` for required dirs like `/etc/avahi/avahi-daemon.conf.d` and `/etc/apt/preferences.d`.
 - This design avoids arbitrary root shell escalation while enabling controlled mutations (pkg install, service restart).
 
 ## State & Idempotence
@@ -112,7 +115,7 @@
 
 - `bin/converge` (User=airplay, NNP, restricted writes):
   - Guards: hold switch, clock/ntp sanity, inventory presence, tag verification (defense-in-depth).
-  - Inventory + ALSA: parses `inventory/hosts/$(hostname -s).yml` for `airplay_name`, `nic`, optional `alsa.*` overrides, optional `target_tag`. If `alsa.vendor_id/product_id` are set, converge targets that USB device; otherwise it auto-detects the first working audio device (USB preferred, then PCI/built-in) and selects a sensible mixer.
+  - Inventory + ALSA: parses `inventory/hosts/$(hostname -s).yml` for `airplay_name`, `nic`, optional `alsa.*` overrides, optional `target_tag`. If `alsa.vendor_id/product_id` are set, converge targets that USB device; otherwise it auto-detects the first working audio device (USB preferred, then PCI/built-in), validates candidates by briefly opening the PCM when possible, and selects a sensible mixer. Best‑effort unmute + 80% volume.
   - Template rendering: substitutes `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{ALSA_MIXER}}`, `{{AVAHI_IFACE}}` into system configs.
   - Package gating: calls `pkg/install.sh` via broker to ensure `shairport-sync`, `avahi-*`, `jq` at minimum versions; attempts `nqptp` if available (optional on Debian).
   - Service management: requests safe restarts/enables through broker; never escalates directly.
@@ -120,7 +123,8 @@
 
 - `converge-broker` (User=root, oneshot):
   - Watches `/run/airplay/queue` (via `.path` unit).
-  - Executes only allow-listed commands and arguments; everything else is denied and logged.
+  - Executes only allow‑listed commands and arguments; everything else is denied and logged.
+  - Handles its own restart commands safely: if multiple `systemctl restart converge-broker.service` entries exist, dedupes and executes at most one to avoid SIGTERM thrash; remaining work is processed on the next invocation.
 
 ## Systemd Units & Relationships
 - `update.timer`: periodic; runs `update.service` every 10min after boot; persistent across reboots.
@@ -128,7 +132,7 @@
 - `update-done.path`: PathChanged on `update.trigger`; starts `converge.service`.
 - `converge.service`: oneshot; core idempotent orchestration; `User=airplay` with restricted `ReadWritePaths`.
 - `converge-broker.path`: directory-not-empty watcher on `/run/airplay/queue`; starts root broker.
-- `converge-broker.service`: oneshot; executes queued root actions.
+- `converge-broker.service`: oneshot; executes queued root actions; sandboxed with `ProtectSystem=strict` and `ReadWritePaths=/run/airplay /opt/airplay_wyse /var/cache/apt /var/lib/apt /var/lib/dpkg /var/tmp /tmp /etc /var/log`.
 - `preflight.service`: sanity checks (deps, sudo, dirs) during bring-up.
 
 ## Inventory Schema (practical subset)
@@ -146,6 +150,8 @@
   - `/usr/bin/apt-get -y install <pkg>`
   - `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/*.deb`
   - `/usr/bin/systemctl restart airplay-*`
+  - `/usr/bin/tee` to vetted destinations under `/etc` and `/etc/systemd/system`
+  - `/usr/bin/install -d -m 0755` for vetted directories
 - Result files:
   - Success: `... .ok`
   - Failure: `... .err` containing stderr; the `.cmd` is removed in all cases.
@@ -167,6 +173,7 @@
 - Logs: `journalctl -u update -u converge -u converge-broker`.
 - Health snapshot: `/var/lib/airplay_wyse/last-health.json` and `.txt`; `make health` convenience.
 - Diagnostics bundle: `./bin/diag` prints systemd status, sudoers glimpse, deps, and recent logs.
+ - Health logic: treats runs with changes as `healthy_changed` (skips synchronous network/device checks). Otherwise, RAOP visibility is healthy if either `_airplay._tcp` or `_raop._tcp` contains the friendly name (case-insensitive) or the host shortname.
 
 ## End-to-End Sequence (Happy Path)
 1) Controller provisions devices: users, dirs, minimal units (`scripts/ops/provision-hosts.sh`).

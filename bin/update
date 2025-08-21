@@ -52,6 +52,32 @@ sync_systemd_units() {
       changed=1
     fi
   done
+  # Sync unit overrides (e.g., shairport-sync ordering after nqptp)
+  for src in "$REPO_DIR"/systemd/overrides/*/*.conf; do
+    [[ -f "$src" ]] || continue
+    # Map repo path systemd/overrides/<unit>.d/<file>.conf to /etc/systemd/system/<unit>.d/<file>.conf
+    local rel unitdir base dest
+    rel=${src#"$REPO_DIR/systemd/overrides/"}
+    unitdir=$(dirname "$rel")
+    base=$(basename "$src")
+    dest="/etc/systemd/system/${unitdir}/$base"
+    # Ensure target directory exists
+    local dstdir
+    dstdir="/etc/systemd/system/${unitdir}"
+    local ts rand cmdf inf
+    if [[ ! -d "$dstdir" ]]; then
+      enqueue_cmd /usr/bin/install -d -m 0755 "$dstdir"
+      changed=1
+    fi
+    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
+      inf="/run/airplay/queue/${ts}.${rand}.in"
+      echo "/usr/bin/tee $dest" >"$cmdf"
+      cp "$src" "$inf"
+      changed=1
+    fi
+  done
   if [[ $changed -eq 1 ]]; then
     # Daemon-reload will be applied when /etc units are next written successfully
     enqueue_cmd /usr/bin/systemctl daemon-reload

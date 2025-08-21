@@ -33,3 +33,28 @@ Note: If your distro mounts `/opt` with `noexec`, converge will fail with exit 2
 - Cause: update.service runs as 'airplay' and system units require root or policy.
 - Fix: updater uses 'sudo systemctl …' and sudoers must include the exact path (/usr/bin/systemctl). Validate with `visudo -cf /etc/sudoers.d/airplay-wyse`.
 - See also: systemd exit 203/EXEC indicates non-executable or wrong interpreter for scripts.
+
+## Broker NAMESPACE errors (status=226/NAMESPACE)
+- Cause: `ProtectSystem=strict` plus `ReadWritePaths` pointing at missing directories causes mount namespace setup to fail.
+- Fix: ensure the broker unit includes only existing parents or broaden to `/etc` and `/var/log`. In this repo, `converge-broker.service` uses:
+  - `ReadWritePaths=/run/airplay /opt/airplay_wyse /var/cache/apt /var/lib/apt /var/lib/dpkg /var/tmp /tmp /etc /var/log`
+  - GitOps sync updates `/etc/systemd/system` and runs `daemon-reload` automatically.
+
+## RAOP “not visible” but device appears in avahi-browse
+- Cause: timing and matching policy. The health check now:
+  - Skips checks when changes were applied in the same run (`healthy_changed`).
+  - Treats healthy if either `_airplay._tcp` or `_raop._tcp` contains the friendly name (case-insensitive) or the host shortname.
+- Debug:
+  - `avahi-browse -rt _raop._tcp`
+  - `avahi-browse -rt _airplay._tcp`
+
+## ALSA device detection rejects valid devices
+- Cause: PCM probe may fail when the device is in use or permissions block `aplay` from opening it.
+- Fix: detection now tolerates “busy”/“permission denied” and skips probing while `shairport-sync` is active.
+- Mixer absence on USB DACs is expected; converge selects from common controls if available and attempts unmute + 80% volume.
+
+## Git ref lock during update
+- Symptom: `cannot lock ref 'refs/remotes/origin/main'` during `git fetch`.
+- Generally transient if the tag checkout succeeded. If persistent, consider pruning:
+  - `git remote prune origin`
+  - `git gc --prune=now`

@@ -24,6 +24,9 @@ is_allowed() {
       # allow only restarts of our stack
       if [ "${1:-}" = "daemon-reload" ]; then return 0; fi
       if [ "${1:-}" = "set-property" ] && [ "${2:-}" = "converge-broker.service" ]; then return 0; fi
+      # explicitly allow managing nqptp lifecycle, which is required for AirPlay 2 timing
+      if [ "${1:-}" = "enable" ] && [ "${2:-}" = "nqptp.service" ]; then return 0; fi
+      if [ "${1:-}" = "start" ] && [ "${2:-}" = "nqptp.service" ]; then return 0; fi
       if [ "${1:-}" = "restart" ]; then
         case "${2:-}" in
           airplay-*) return 0 ;;
@@ -41,6 +44,7 @@ is_allowed() {
           /etc/apt/preferences.d) return 0 ;;
           /run/systemd/system/converge-broker.service.d) return 0 ;;
           /etc/avahi/avahi-daemon.conf.d) return 0 ;;
+          /etc/systemd/system/shairport-sync.service.d) return 0 ;;
         esac
       fi
       return 1
@@ -55,6 +59,7 @@ is_allowed() {
         /etc/systemd/system/converge-broker.path) return 0 ;;
         /etc/systemd/system/converge.service) return 0 ;;
         /etc/systemd/system/airplay-*.service) return 0 ;;
+        /etc/systemd/system/shairport-sync.service.d/*.conf) return 0 ;;
         /etc/systemd/system/update.service) return 0 ;;
         /etc/systemd/system/update-done.path) return 0 ;;
         /etc/systemd/system/preflight.service) return 0 ;;
