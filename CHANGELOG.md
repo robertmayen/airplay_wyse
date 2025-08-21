@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.17 - 2025-08-21
+### Fixed
+- **Critical**: Fixed converge service bootstrap validation failures on properly configured systems
+- Added ReadOnlyPaths=/etc/sudoers.d to converge service override to allow sudoers validation
+- Resolves "Permission denied" errors when converge checks bootstrap status
+- Fixes false-negative bootstrap detection even when sudo is correctly configured
+
+### Impact
+- Converge service now correctly validates sudo configuration without permission errors
+- Enables proper AirPlay 2 deployment on systems with correct sudo setup
+- Eliminates need for manual intervention when sudo is already properly configured
+
 ## v0.2.16 - 2025-01-21
 ### Fixed
 - **Critical**: Fixed read-only filesystem issues on Wyse thin clients
