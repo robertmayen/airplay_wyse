@@ -178,6 +178,7 @@ main() {
     "$REPO_DIR/bin/reconcile" \
     "$REPO_DIR/bin/preflight" \
     "$REPO_DIR/bin/update" \
+    "$REPO_DIR/bin/bootstrap" \
     "$REPO_DIR/bin/diag" \
     "$REPO_DIR/bin/health" \
     "$REPO_DIR/bin/rollback" \

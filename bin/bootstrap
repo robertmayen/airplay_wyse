@@ -4,37 +4,39 @@ set -euo pipefail
 # Bootstrap privileged configuration for AirPlay Wyse
 # - Install sudoers NOPASSWD for airplay → systemd-run
 # - Install /usr/local/sbin/airplay-sd-run wrapper
+# - Validate privileges work
 # Idempotent; safe to run multiple times.
 
 REPO_DIR="/opt/airplay_wyse"
 STATE_DIR="/var/lib/airplay_wyse"
 MARKER="$STATE_DIR/bootstrap.ok"
 
-log() { echo "$(date --iso-8601=seconds) [bootstrap] $*"; }
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [bootstrap] $*"; }
 
 require_root() {
   if [[ $(id -u) -ne 0 ]]; then
-    log "must run as root; skipping"
-    exit 0
+    log "must run as root"
+    exit 1
   fi
 }
 
-ensure_dirs() { mkdir -p "$STATE_DIR"; }
+ensure_state_dir() { mkdir -p "$STATE_DIR" 2>/dev/null || true; }
 
 install_sudoers() {
   local sdfile=/etc/sudoers.d/airplay-wyse
-  mkdir -p /etc/sudoers.d
+  install -d -m 0755 /etc/sudoers.d
   local tmp; tmp=$(mktemp)
   {
-    echo "# AirPlay Wyse privilege model (NOPASSWD systemd-run for airplay)"
-    echo "Defaults:airplay !requiretty"
-    echo "airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run"
+    printf '# AirPlay Wyse privilege model (NOPASSWD systemd-run for airplay)\n'
+    printf 'Defaults:airplay !requiretty\n'
+    printf 'airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run\n'
   } >"$tmp"
   install -o root -g root -m 0440 "$tmp" "$sdfile"
   rm -f "$tmp"
   if command -v visudo >/dev/null 2>&1; then
     visudo -cf "$sdfile" >/dev/null
   fi
+  log "sudoers configured at $sdfile"
 }
 
 install_wrapper() {
@@ -42,33 +44,37 @@ install_wrapper() {
   local dst=/usr/local/sbin/airplay-sd-run
   if [[ -f "$src" ]]; then
     install -o root -g root -m 0755 "$src" "$dst"
+    log "wrapper installed at $dst"
   else
-    log "wrapper missing at $src; skipping"
+    log "wrapper missing at $src"
   fi
 }
 
-validate() {
-  if id -u airplay >/dev/null 2>&1; then
-    sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1 || {
-      log "validation failed: airplay cannot run systemd-run without password"; return 1;
-    }
+validate_privs() {
+  if ! id -u airplay >/dev/null 2>&1; then
+    log "airplay user missing; cannot validate"
+    return 1
   fi
-  return 0
+  if sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1; then
+    log "sudo configuration successful"
+    return 0
+  fi
+  log "sudo configuration failed"
+  return 1
 }
 
 main() {
   require_root
-  ensure_dirs
+  ensure_state_dir
   install_sudoers
   install_wrapper
-  if validate; then
-    date --iso-8601=seconds >"$MARKER" 2>/dev/null || true
+  if validate_privs; then
+    date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER" 2>/dev/null || true
     log "bootstrap complete"
   else
-    log "bootstrap completed but validation failed"
+    log "bootstrap validation failed"
     exit 1
   fi
 }
 
 main "$@"
-
