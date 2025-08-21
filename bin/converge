@@ -226,11 +226,23 @@ resolve_alsa_device() {
   # Simple helper: try to open a PCM for a very short time (silent zeroes)
   try_open_device() {
     local dev="$1"
-    if ! command -v aplay >/dev/null 2>&1; then
-      # If aplay is missing, assume success (pkg step should install it)
-      return 0
-    fi
-    timeout 1 aplay -q -t raw -c 2 -f S16_LE -r 44100 -D "$dev" < /dev/zero 2>/dev/null
+    # If aplay is missing, or shairport-sync is active (likely holding the device),
+    # do not negatively judge the device — treat as acceptable.
+    if ! command -v aplay >/dev/null 2>&1; then return 0; fi
+    if systemctl is-active --quiet shairport-sync.service 2>/dev/null; then return 0; fi
+    # Attempt a very short, silent open; tolerate busy/permission errors.
+    local err rc tf; tf=$(mktemp)
+    set +e
+    timeout 1 aplay -q -t raw -c 2 -f S16_LE -r 44100 -D "$dev" < /dev/zero 2>"$tf"
+    rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then rm -f "$tf"; return 0; fi
+    err=$(tr '\n' ' ' <"$tf" | tr -d '\r')
+    rm -f "$tf"
+    # Accept devices that fail due to being busy or permission limited.
+    if echo "$err" | grep -Eqi 'busy|permission denied'; then return 0; fi
+    # Otherwise, treat as not-openable and let the caller try other forms.
+    return 1
   }
 
   # 1) Inventory override (USB by VID:PID with optional serial)
