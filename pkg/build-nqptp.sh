@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Build a local nqptp .deb from source and drop it into pkg/ as nqptp_<ver>_<arch>.deb
+# Optionally install the built package directly (on-device) with --install-directly.
 # Usage:
-#   pkg/build-nqptp.sh [--ref <git-ref>] [--repo <url>] [--no-clean]
+#   pkg/build-nqptp.sh [--ref <git-ref>] [--repo <url>] [--no-clean] [--install-directly]
 #
 # Notes:
 # - Run on a Debian/Ubuntu build host (not macOS). Requires: git, autoreconf (autoconf, automake, libtool),
@@ -16,6 +17,7 @@ WORK_DIR="$(mktemp -d)"
 SRC_URL="https://github.com/mikebrady/nqptp"
 GIT_REF=""
 CLEANUP=1
+INSTALL_DIRECT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,6 +27,8 @@ while [[ $# -gt 0 ]]; do
       SRC_URL="$2"; shift 2;;
     --no-clean)
       CLEANUP=0; shift;;
+    --install-directly)
+      INSTALL_DIRECT=1; shift;;
     *)
       echo "Unknown arg: $1" >&2; exit 2;;
   esac
@@ -98,3 +102,12 @@ popd >/dev/null
 
 echo "[build-nqptp] Done: $OUT_DEB"
 
+if [[ $INSTALL_DIRECT -eq 1 ]]; then
+  echo "[build-nqptp] Installing built package: $OUT_DEB"
+  dpkg -i "$OUT_DEB" || apt-get -y -f install
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || true
+    systemctl enable nqptp.service || true
+    systemctl restart nqptp.service || systemctl start nqptp.service || true
+  fi
+fi

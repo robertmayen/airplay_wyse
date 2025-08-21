@@ -561,6 +561,107 @@ has_raop2() { has_airplay2_build; }
 # nqptp activity check
 nqptp_active() { systemctl is-active --quiet nqptp.service 2>/dev/null; }
 
+# Install build dependencies for nqptp
+install_nqptp_build_deps() {
+  log "Installing nqptp build dependencies"
+  systemd_run pkg-ensure -- \
+    "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y build-essential autoconf automake libtool pkg-config git libmd-dev libsystemd-dev"
+}
+
+# Install build dependencies for shairport-sync
+install_shairport_build_deps() {
+  log "Installing shairport-sync build dependencies"
+  systemd_run pkg-ensure -- \
+    "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y build-essential autoconf automake libtool pkg-config git libssl-dev libavahi-client-dev libasound2-dev libsoxr-dev libconfig-dev libdbus-1-dev libplist-dev"
+}
+
+# Build nqptp from source
+build_nqptp_from_source() {
+  log "Building nqptp from source (APT unavailable)"
+  
+  # Install build dependencies
+  install_nqptp_build_deps
+  
+  # Use existing build script with --install-directly
+  if [[ -x "$REPO_DIR/pkg/build-nqptp.sh" ]]; then
+    systemd_run pkg-ensure -- \
+      "cd /opt/airplay_wyse && /opt/airplay_wyse/pkg/build-nqptp.sh --install-directly"
+    return $?
+  else
+    log "Build script missing: $REPO_DIR/pkg/build-nqptp.sh"
+    return 1
+  fi
+}
+
+# Build shairport-sync from source with RAOP2
+build_shairport_sync_from_source() {
+  log "Building RAOP2-enabled shairport-sync from source"
+  
+  # Install build dependencies
+  install_shairport_build_deps
+  
+  # Use existing build script with --install-directly
+  if [[ -x "$REPO_DIR/pkg/build-shairport-sync.sh" ]]; then
+    systemd_run pkg-ensure -- \
+      "cd /opt/airplay_wyse && /opt/airplay_wyse/pkg/build-shairport-sync.sh --install-directly"
+    return $?
+  else
+    log "Build script missing: $REPO_DIR/pkg/build-shairport-sync.sh"
+    return 1
+  fi
+}
+
+# Ensure nqptp is installed (APT first, then source fallback)
+ensure_nqptp() {
+  # Quick check: already installed and active
+  if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+    if systemctl is-active --quiet nqptp.service 2>/dev/null; then
+      return 0
+    fi
+  fi
+  
+  log "Ensuring nqptp installation"
+  
+  # 1. Try APT first (fast path)
+  if command -v apt-get >/dev/null 2>&1; then
+    if systemd_run pkg-ensure -- \
+      "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y nqptp"; then
+      log "nqptp installed via APT"
+      return 0
+    fi
+  fi
+  
+  # 2. Build from source (GitOps fallback)
+  log "APT installation failed, falling back to source build"
+  if build_nqptp_from_source; then
+    log "nqptp built and installed from source"
+    return 0
+  fi
+  
+  log "WARNING: nqptp installation failed, AirPlay 2 may not work optimally"
+  return 1
+}
+
+# Ensure RAOP2-enabled shairport-sync
+ensure_raop2_shairport_sync() {
+  # 1. Check if current version has RAOP2
+  if has_airplay2_build; then
+    log "shairport-sync already has RAOP2 support"
+    return 0
+  fi
+  
+  log "Current shairport-sync lacks RAOP2, upgrading..."
+  
+  # 2. Build RAOP2-enabled version from source
+  if build_shairport_sync_from_source; then
+    log "RAOP2-enabled shairport-sync built and installed from source"
+    return 0
+  fi
+  
+  log "WARNING: RAOP2 upgrade failed, using existing shairport-sync"
+  return 1
+}
+
 # Remediate missing RAOP2 capability (install/start nqptp; upgrade shairport-sync)
 remediate_raop2() {
   local need=0 changed=0
@@ -570,28 +671,15 @@ remediate_raop2() {
     echo 0; return 0
   fi
 
-  log "RAOP2 remediation: desired_capability=RAOP2; attempting package and unit fixes"
+  log "RAOP2 remediation: desired_capability=RAOP2; attempting fixes"
 
-  # Try to install local .debs first (preferred rollout path)
-  local debs=()
-  local f
-  shopt -s nullglob
-  # Prefer explicit AP2-enabled shairport-sync builds if provided
-  for f in "$REPO_DIR"/pkg/nqptp_*.deb "$REPO_DIR"/pkg/shairport-sync"*ap2*".deb "$REPO_DIR"/pkg/shairport-sync"*raop2*".deb; do
-    [[ -f "$f" ]] && debs+=("$f")
-  done
-  shopt -u nullglob
-  if [[ ${#debs[@]} -gt 0 ]]; then
-    systemd_run pkg-ensure -- \
-      "/usr/bin/dpkg -i ${debs[*]} || /usr/bin/apt-get -y -f install"
+  # Use the new ensure functions
+  if ensure_nqptp; then
     changed=1
-  else
-    # Fallback: try distro packages if available
-    if command -v apt-get >/dev/null 2>&1; then
-      systemd_run pkg-ensure -- \
-        "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y shairport-sync nqptp || true"
-      changed=1
-    fi
+  fi
+  
+  if ensure_raop2_shairport_sync; then
+    changed=1
   fi
 
   # Ensure shairport-sync drop-in uses nqptp and units are (re)loaded
