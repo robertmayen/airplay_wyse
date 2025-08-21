@@ -5,8 +5,8 @@ echo "=== System ==="
 hostnamectl || true
 systemctl --version || true
 
-echo -e "\n=== Services (update, converge, broker) ==="
-for u in update.service converge.service converge-broker.service converge-broker.path update-done.path; do
+echo -e "\n=== Services (update, converge) ==="
+for u in update.service converge.service; do
   echo "# $u"
   systemctl status --no-pager -l "$u" || true
 done

@@ -11,6 +11,7 @@
   - Shows `systemctl status --no-pager converge.service`.
   - Shows `journalctl -u converge.service -n 150 --no-pager`.
   - No additional sudo is required beyond repo defaults.
+  - If you see permission errors reading logs, either add your user to the `adm` or `systemd-journal` group, or run with `sudo journalctl`.
 ## Signed tag verification failures
 
 - Symptom: converge exits with code 5 and status "verify_failed".

@@ -81,8 +81,19 @@ sync_systemd_units() {
       changed=1
     fi
   done
+  # Ensure converge drop-in override mirrors SuccessExitStatus
+  local conv_ov_src="$REPO_DIR/systemd/overrides/converge.service.d/override.conf"
+  if [[ -f "$conv_ov_src" ]]; then
+    systemd_run unit-write -- "/usr/bin/install -d -m 0755 /etc/systemd/system/converge.service.d"
+    systemd_run unit-write -- "/usr/bin/install -m 0644 '$conv_ov_src' /etc/systemd/system/converge.service.d/override.conf"
+    changed=1
+  fi
   if [[ $changed -eq 1 ]]; then
     systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+    # Log SuccessExitStatus configured for converge.service for verification
+    local ses
+    ses=$(systemctl show -p SuccessExitStatus --value converge.service 2>/dev/null || echo)
+    log "converge.service SuccessExitStatus='${ses}'"
   fi
   # Remove deprecated units (.path and broker) if present
   local obsolete=(
@@ -455,12 +466,12 @@ ensure_nqptp_started() {
 }
 
 has_airplay2_build() {
-  # Best-effort detection: look for "AirPlay 2" or RAOP2 in version output
+  # Best-effort detection: look for AirPlay 2 / RAOP2 / NQPTP in version output
   if ! command -v shairport-sync >/dev/null 2>&1; then return 1; fi
   local v
   v=$(shairport-sync -V 2>&1 || true)
   log "Checking shairport-sync for AirPlay 2 support: $(echo "$v" | head -1)"
-  echo "$v" | grep -Eqi 'AirPlay[[:space:]]*2|RAOP2' && return 0 || return 1
+  echo "$v" | grep -Eqi 'Air[[:space:]]*Play[[:space:]]*2|RAOP2|NQPTP' && return 0 || return 1
 }
 
 # Remediate missing RAOP2 capability (install/start nqptp; upgrade shairport-sync)
@@ -478,7 +489,8 @@ remediate_raop2() {
   local debs=()
   local f
   shopt -s nullglob
-  for f in "$REPO_DIR"/pkg/nqptp_*.deb "$REPO_DIR"/pkg/shairport-sync_*.deb; do
+  # Prefer explicit AP2-enabled shairport-sync builds if provided
+  for f in "$REPO_DIR"/pkg/nqptp_*.deb "$REPO_DIR"/pkg/shairport-sync*ap2*\.deb" "$REPO_DIR"/pkg/shairport-sync*raop2*\.deb"; do
     [[ -f "$f" ]] && debs+=("$f")
   done
   shopt -u nullglob
