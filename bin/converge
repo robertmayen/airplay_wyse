@@ -131,6 +131,7 @@ render_template() {
   sed -i "s/{{AIRPLAY_NAME}}/${AIRPLAY_NAME//\//\/}/g" "$tmp"
   sed -i "s/{{ALSA_DEVICE}}/${ALSA_DEVICE//\//\/}/g" "$tmp"
   sed -i "s/{{AVAHI_IFACE}}/${AVAHI_IFACE//\//\/}/g" "$tmp"
+  sed -i "s/{{ALSA_MIXER}}/${ALSA_MIXER//\//\/}/g" "$tmp"
   # Write rendered file to a temp path owned by airplay; a root copy, if needed, must be enqueued externally.
   install -m 0644 "$tmp" "$dst" 2>/dev/null || true
   rm -f "$tmp"
@@ -151,53 +152,138 @@ needs_update() {
 }
 
 resolve_alsa_device() {
-  # Minimal resolver; prefer /dev/snd/by-id when present; fallback to plughw:<card>,<dev>
+  # Auto-detect resolver (USB preferred, then PCI/built-in). Optional inventory override via alsa.vendor_id/product_id.
+  # Sets: ALSA_DEVICE (string) and ALSA_CARD (numeric card index used for mixer detection).
   local vid pid serial devnum
-  vid=$(yaml_get 'alsa.vendor_id')
-  pid=$(yaml_get 'alsa.product_id')
+  vid=$(yaml_get 'alsa.vendor_id' || true)
+  pid=$(yaml_get 'alsa.product_id' || true)
   serial=$(yaml_get 'alsa.serial' || true)
   devnum=$(yaml_get 'alsa.device_num' || true)
   devnum=${devnum:-0}
 
-  local byid target
-  byid="/dev/snd/by-id"
-  if [[ -d "$byid" ]]; then
-    for n in "$byid"/*; do
-      [[ -e "$n" ]] || continue
-      if [[ "$n" == *"_${vid}_${pid}"* ]] || [[ "$n" == *"${vid}:${pid}"* ]]; then
-        if [[ -z "$serial" || "$n" == *"${serial}"* ]]; then
-          target="$n"
-          break
-        fi
-      fi
+  ALSA_CARD=""
+
+  # Helper: first playback device number for a card index
+  first_playback_devnum_for_card() {
+    local card_idx="$1"
+    local d
+    for d in /proc/asound/card"$card_idx"/pcm*p; do
+      [[ -e "$d" ]] || continue
+      d=$(basename "$d") # e.g., pcm0p
+      echo "${d#pcm}" | tr -d 'p'
+      return 0
     done
-  fi
-  if [[ -n "${target:-}" ]]; then
-    ALSA_DEVICE="$target"
-    return 0
+    return 1
+  }
+
+  # Helper: resolve by-id symlink to card index if possible
+  card_index_from_byid() {
+    local path="$1" real
+    real=$(readlink -f "$path" 2>/dev/null || true)
+    if [[ "$real" =~ /dev/snd/.*C([0-9]+)D[0-9]+ ]]; then
+      echo "${BASH_REMATCH[1]}"
+      return 0
+    fi
+    echo ""
+    return 1
+  }
+
+  # 1) Inventory override (USB by VID:PID with optional serial)
+  if [[ -n "${vid:-}" && -n "${pid:-}" ]]; then
+    local byid target
+    byid="/dev/snd/by-id"
+    if [[ -d "$byid" ]]; then
+      for n in "$byid"/*; do
+        [[ -e "$n" ]] || continue
+        if [[ "$n" == *"_${vid}_${pid}"* ]] || [[ "$n" == *"${vid}:${pid}"* ]]; then
+          if [[ -z "$serial" || "$n" == *"${serial}"* ]]; then
+            target="$n"; break
+          fi
+        fi
+      done
+    fi
+    if [[ -n "${target:-}" ]]; then
+      ALSA_DEVICE="$target"
+      ALSA_CARD=$(card_index_from_byid "$target" || true)
+      if [[ -z "${ALSA_CARD:-}" ]]; then
+        # Fallback resolve card index via sysfs VID:PID
+        for cpath in /sys/class/sound/card*/device; do
+          [[ -d "$cpath" ]] || continue
+          local udevdir="$(dirname "$cpath")/.."
+          if [[ -f "$udevdir/idVendor" && -f "$udevdir/idProduct" ]]; then
+            local fv fp fs
+            fv=$(cat "$udevdir/idVendor")
+            fp=$(cat "$udevdir/idProduct")
+            fs=$(cat "$udevdir/serial" 2>/dev/null || echo)
+            if [[ "0x$fv" == "$vid" && "0x$fp" == "$pid" ]]; then
+              if [[ -z "$serial" || "$fs" == "$serial" ]]; then
+                local card
+                card=$(basename "$(dirname "$cpath")"); card=${card#card}
+                ALSA_CARD="$card"; break
+              fi
+            fi
+          fi
+        done
+      fi
+      return 0
+    fi
+    log "ALSA override VID:PID not found; falling back to auto-detect"
   fi
 
-  # Fallback scan
-  for cpath in /sys/class/sound/card*/device; do
-    [[ -d "$cpath" ]] || continue
-    local udevdir="$(dirname "$cpath")/.."
+  # 2) Auto-detect — USB first
+  local card_dir usb_candidate="" usb_devnum=""
+  for card_dir in /sys/class/sound/card*; do
+    [[ -d "$card_dir" ]] || continue
+    local cidx; cidx=$(basename "$card_dir"); cidx=${cidx#card}
+    local udevdir="$card_dir/device/.."
     if [[ -f "$udevdir/idVendor" && -f "$udevdir/idProduct" ]]; then
-      local fv fp fs
-      fv=$(cat "$udevdir/idVendor")
-      fp=$(cat "$udevdir/idProduct")
-      fs=$(cat "$udevdir/serial" 2>/dev/null || echo)
-      if [[ "0x$fv" == "$vid" && "0x$fp" == "$pid" ]]; then
-        if [[ -z "$serial" || "$fs" == "$serial" ]]; then
-          local card
-          card=$(basename "$(dirname "$cpath")")
-          card=${card#card}
-          ALSA_DEVICE="plughw:${card},${devnum}"
-          return 0
-        fi
+      local pnum
+      if pnum=$(first_playback_devnum_for_card "$cidx" 2>/dev/null); then
+        usb_candidate="$cidx"; usb_devnum="$pnum"; break
       fi
     fi
   done
+  if [[ -n "${usb_candidate:-}" ]]; then
+    ALSA_CARD="$usb_candidate"
+    ALSA_DEVICE="plughw:${ALSA_CARD},${usb_devnum}"
+    return 0
+  fi
+
+  # 3) Fallback — first card with playback (PCI/built-in)
+  for card_dir in /sys/class/sound/card*; do
+    [[ -d "$card_dir" ]] || continue
+    local cidx; cidx=$(basename "$card_dir"); cidx=${cidx#card}
+    local pnum
+    if pnum=$(first_playback_devnum_for_card "$cidx" 2>/dev/null); then
+      ALSA_CARD="$cidx"
+      ALSA_DEVICE="plughw:${ALSA_CARD},${pnum}"
+      return 0
+    fi
+  done
+
   return 1
+}
+
+# Determine ALSA mixer control with override and sensible defaults
+resolve_alsa_mixer() {
+  local inv_mix
+  inv_mix=$(yaml_get 'alsa.mixer' || true)
+  if [[ -n "${inv_mix:-}" ]]; then
+    ALSA_MIXER="$inv_mix"
+    return 0
+  fi
+  ALSA_MIXER="Digital"
+  if command -v amixer >/dev/null 2>&1 && [[ -n "${ALSA_CARD:-}" ]]; then
+    local names
+    names=$(amixer -c "$ALSA_CARD" scontrols 2>/dev/null | awk -F"'" '/Simple mixer control/ {print $2}') || names=""
+    local cand
+    for cand in PCM Master Digital Speaker Headphone "Line Out"; do
+      if echo "$names" | grep -qx "$cand"; then
+        ALSA_MIXER="$cand"; break
+      fi
+    done
+  fi
+  return 0
 }
 
 apply_packages() {
@@ -220,9 +306,10 @@ apply_configs() {
   AVAHI_IFACE=$(yaml_get 'nic')
 
   if ! resolve_alsa_device; then
-    log "ALSA device not found for inventory selector"
+    log "ALSA device not found (auto-detect/override)"
     return 2
   fi
+  resolve_alsa_mixer || true
 
   # shairport-sync (render into tmp and request a restart via broker if needed)
   local tmp_ss; tmp_ss=$(mktemp)

@@ -1,8 +1,6 @@
 fqdn: wyse-sony.audio.home.arpa
 airplay_name: "Wyse Sony"
 nic: eno1
-alsa.vendor_id: 0x1234
-alsa.product_id: 0x9999
 alsa.serial: ""  # optional
 alsa.device_num: 0
 alsa.mixer: Digital

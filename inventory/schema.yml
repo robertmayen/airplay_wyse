@@ -3,9 +3,9 @@ required:
   - fqdn
   - airplay_name
   - nic
+optional:
   - alsa.vendor_id
   - alsa.product_id
-optional:
   - alsa.serial
   - alsa.device_num
   - alsa.mixer

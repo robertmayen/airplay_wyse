@@ -55,8 +55,8 @@
 - Tag verification: Devices must trust the maintainer key; unsigned/untrusted tags cause a verify failure.
 - Converge phases (high level):
   - Prechecks: held switch (`/etc|/var/lib/airplay_wyse/hold`), time sync check, signed tag verify.
-  - Inventory: Load host file and derive variables (e.g., `AIRPLAY_NAME`, `ALSA_*`, `AVAHI_IFACE`).
-  - Templates: Render `cfg/*.tmpl` into `/etc/...` via `render_template` with safe placeholder substitution.
+  - Inventory: Load host file and derive variables (e.g., `AIRPLAY_NAME`, `AVAHI_IFACE`), with ALSA auto-detection and optional overrides.
+  - Templates: Render `cfg/*.tmpl` into `/etc/...` via `render_template` with safe placeholder substitution (`{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{ALSA_MIXER}}`, `{{AVAHI_IFACE}}`).
   - Packages: Ensure required packages via `pkg/install.sh` (apt pins and min versions in `pkg/versions.sh`).
   - Services: Request restarts/enablement through the broker queue when root is required.
   - Health: Emit JSON/text status under `/var/lib/airplay_wyse/last-health.*` and exit with semantic codes.
@@ -111,8 +111,8 @@
 
 - `bin/converge` (User=airplay, NNP, restricted writes):
   - Guards: hold switch, clock/ntp sanity, inventory presence, tag verification (defense-in-depth).
-  - Inventory load: parses `inventory/hosts/$(hostname -s).yml` for `airplay_name`, `alsa.*`, `nic`, optional `target_tag`.
-  - Template rendering: substitutes `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{AVAHI_IFACE}}` into system configs.
+  - Inventory + ALSA: parses `inventory/hosts/$(hostname -s).yml` for `airplay_name`, `nic`, optional `alsa.*` overrides, optional `target_tag`. If `alsa.vendor_id/product_id` are set, converge targets that USB device; otherwise it auto-detects the first working audio device (USB preferred, then PCI/built-in) and selects a sensible mixer.
+  - Template rendering: substitutes `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{ALSA_MIXER}}`, `{{AVAHI_IFACE}}` into system configs.
   - Package gating: calls `pkg/install.sh` via broker to ensure `shairport-sync`, `avahi-*`, `jq` at minimum versions; attempts `nqptp` if available (optional on Debian).
   - Service management: requests safe restarts/enables through broker; never escalates directly.
   - State/health: writes JSON and txt status; returns semantic exit codes for timers/ops.
@@ -133,7 +133,10 @@
 ## Inventory Schema (practical subset)
 - `airplay_name` (string): Friendly name advertised to AirPlay clients.
 - `nic` (string): Interface used by Avahi/NQPTP; example `enp3s0`.
-- `alsa.vendor_id` (hex), `alsa.product_id` (hex), `alsa.serial` (string, optional), `alsa.device_num` (int), `alsa.mixer` (string).
+- `alsa.vendor_id` (hex) and `alsa.product_id` (hex): Optional overrides to pin a specific USB audio device; when omitted, converge auto-detects audio hardware.
+- `alsa.serial` (string, optional): Further narrows the override match when multiple identical USB devices are present.
+- `alsa.device_num` (int, optional): ALSA subdevice index; default auto-detected to the first playback device.
+- `alsa.mixer` (string, optional): Mixer control override; when omitted, converge auto-selects from common controls (PCM, Master, Digital, Speaker, Headphone, Line Out).
 - `target_tag` (string, optional): Forces a canary or pin on this host.
 
 ## Queue Mechanics (Root Broker)
@@ -177,7 +180,7 @@
 
 ## Inventory & Templates
 - Host files: `inventory/hosts/<host>.yml` drive device behavior (AirPlay name, NIC, ALSA IDs, mixer, optional serial).
-- Templates: `cfg/shairport-sync.conf.tmpl`, `cfg/nqptp.conf.tmpl`, and Avahi stanzas render with variables like `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{AVAHI_IFACE}}`.
+- Templates: `cfg/shairport-sync.conf.tmpl`, `cfg/nqptp.conf.tmpl`, and Avahi stanzas render with variables like `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{ALSA_MIXER}}`, `{{AVAHI_IFACE}}`.
 - Validation: Keep keys aligned with `inventory/schema.yml`; unknown keys may be ignored.
 
 ## Controller Workflow

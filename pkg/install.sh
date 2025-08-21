@@ -5,7 +5,7 @@ set -euo pipefail
 # Broker-only: enqueue root-required operations to /run/airplay/queue; never call sudo.
 
 # Core packages required for basic AirPlay. nqptp is optional on Debian.
-REQ_PKGS=(shairport-sync avahi-daemon avahi-utils jq)
+REQ_PKGS=(shairport-sync avahi-daemon avahi-utils jq alsa-utils)
 OPT_PKGS=(nqptp)
 
 have() { dpkg -s "$1" >/dev/null 2>&1; }
