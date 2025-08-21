@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.3.1 - 2025-08-21
+### Enhanced - Aggressive AirPlay 2 Component Installation
+- **Repository Fix**: Enhanced converge script with comprehensive AirPlay 2 support
+- Added aggressive retry logic for nqptp installation (3 attempts with 5-second delays)
+- Enhanced RAOP2-enabled shairport-sync building with 2-attempt retry logic
+- Improved error handling and detailed logging for component installation failures
+- Added comprehensive status verification with detailed diagnostic output
+
+### AirPlay 2 Installation Improvements
+- ensure_nqptp() function with APT-first, source-fallback pattern
+- ensure_raop2_shairport_sync() function with enhanced building logic
+- Aggressive ensure_airplay2_support() with multi-phase installation approach
+- Better service coordination (stop shairport during installation, proper restart sequence)
+- Enhanced final verification with detailed status reporting
+
+### Service Management Enhancements
+- Improved systemd service restart coordination during component installation
+- Better handling of service dependencies (nqptp before shairport-sync)
+- Enhanced override configuration deployment for both nqptp and shairport-sync
+- Proper daemon-reload and service restart sequencing
+
+### Diagnostics & Logging
+- Detailed phase-by-phase installation logging
+- Comprehensive final status verification (nqptp_installed, nqptp_active, has_raop2)
+- Better error categorization and failure reporting
+- Enhanced success/partial success/failure detection
+
+### Impact
+- Addresses persistent "Unit nqptp.service could not be found" issues
+- Provides robust AirPlay 2 component installation on Wyse machines
+- Eliminates need for manual intervention in AirPlay 2 setup
+- Repository-level solution replacing ad-hoc shell fixes
+
 ## v0.3.0 - 2025-08-21
 ### Major - Repository-Level Bootstrap Fixes
 - **Breaking**: Replaced runtime shell patches with permanent repository-level fixes
