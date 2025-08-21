@@ -13,7 +13,7 @@ set -euo pipefail
 #   via the broker using: /usr/bin/dpkg -i /opt/airplay_wyse/pkg/nqptp_*.deb
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
-WORK_DIR="$(mktemp -d)"
+WORK_DIR="$(mktemp -d -p /var/tmp)"
 SRC_URL="https://github.com/mikebrady/nqptp"
 GIT_REF=""
 CLEANUP=1
@@ -38,7 +38,20 @@ echo "[build-nqptp] Using source: $SRC_URL ${GIT_REF:+(ref $GIT_REF)}"
 echo "[build-nqptp] Working in: $WORK_DIR"
 
 cleanup() {
+  local exit_code=$?
   [[ $CLEANUP -eq 1 ]] && rm -rf "$WORK_DIR" || true
+  
+  # Error recovery: ensure sudo is still functional
+  if [[ $exit_code -ne 0 ]]; then
+    echo "[build-nqptp] Build failed with exit code $exit_code"
+    # Test sudo functionality
+    if ! sudo -n true 2>/dev/null; then
+      echo "[build-nqptp] WARNING: sudo may need reconfiguration"
+      echo "[build-nqptp] To fix: visudo -cf /etc/sudoers.d/airplay-wyse"
+    fi
+  fi
+  
+  return $exit_code
 }
 trap cleanup EXIT
 

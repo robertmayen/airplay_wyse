@@ -10,7 +10,7 @@ set -euo pipefail
 
 SRC_URL="https://github.com/mikebrady/shairport-sync"
 GIT_REF=""
-WORK_DIR="$(mktemp -d)"
+WORK_DIR="$(mktemp -d -p /var/tmp)"
 CLEAN=1
 INSTALL_DIRECT=0
 
@@ -96,11 +96,30 @@ else
   exit 1
 fi
 
-if [[ $CLEAN -eq 1 ]]; then
-  echo "[build-shairport] Cleaning up $WORK_DIR"
-  rm -rf "$WORK_DIR"
-else
-  echo "[build-shairport] Left build dir: $WORK_DIR"
-fi
+cleanup() {
+  local exit_code=$?
+  
+  if [[ $CLEAN -eq 1 ]]; then
+    echo "[build-shairport] Cleaning up $WORK_DIR"
+    rm -rf "$WORK_DIR"
+  else
+    echo "[build-shairport] Left build dir: $WORK_DIR"
+  fi
+  
+  # Error recovery: ensure sudo is still functional
+  if [[ $exit_code -ne 0 ]]; then
+    echo "[build-shairport] Build failed with exit code $exit_code"
+    # Test sudo functionality
+    if ! sudo -n true 2>/dev/null; then
+      echo "[build-shairport] WARNING: sudo may need reconfiguration"
+      echo "[build-shairport] To fix: visudo -cf /etc/sudoers.d/airplay-wyse"
+    fi
+  fi
+  
+  return $exit_code
+}
+
+# Set up cleanup trap
+trap cleanup EXIT
 
 exit 0

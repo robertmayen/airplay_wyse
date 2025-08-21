@@ -51,7 +51,9 @@ case "$PROFILE" in
              --property=ReadWritePaths=/var/lib/dpkg \
              --property=ReadWritePaths=/var/log \
              --property=ReadWritePaths=/etc/apt \
-             --property=ReadWritePaths=/opt/airplay_wyse/pkg ) ;;
+             --property=ReadWritePaths=/opt/airplay_wyse/pkg \
+             --property=ReadWritePaths=/tmp \
+             --property=ReadWritePaths=/var/tmp ) ;;
   svc-restart)
     : ;;
 esac
@@ -76,4 +78,3 @@ if [[ $rc -ne 0 ]]; then
 fi
 echo "RESULT=OK CAP=${PROFILE} RUN_ID=${run_id}" >&2
 exit 0
-

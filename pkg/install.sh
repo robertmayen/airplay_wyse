@@ -72,8 +72,40 @@ for p in "${OPT_PKGS[@]}"; do
   if [[ -n "$cand" && "$cand" != "(none)" ]]; then
     if [[ $did_update -eq 0 ]]; then systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1; fi
     systemd_run "/usr/bin/apt-get -y install $p"; changed=1
+  else
+    # No APT candidate for optional package - prepare for source build
+    echo "[INFO] Package $p not available in APT - will attempt source build if needed"
   fi
 done
+
+# Install minimal build dependencies if we need to build from source
+BUILD_DEPS=(build-essential autoconf automake libtool pkg-config git)
+need_build_deps=0
+
+# Check if we need to build nqptp from source
+if ! have nqptp; then
+  cand=$(apt_candidate nqptp || echo none)
+  if [[ -z "$cand" || "$cand" == "(none)" ]]; then
+    # No APT package and not installed - we'll need to build
+    if [[ ! -f "$REPO_DIR"/pkg/nqptp_*.deb ]]; then
+      need_build_deps=1
+      echo "[INFO] nqptp needs to be built from source - ensuring build dependencies"
+    fi
+  fi
+fi
+
+# Install build dependencies if needed
+if [[ $need_build_deps -eq 1 ]]; then
+  for dep in "${BUILD_DEPS[@]}"; do
+    if ! have "$dep"; then
+      echo "[INFO] Installing build dependency: $dep"
+      systemd_run "/usr/bin/apt-get -y install $dep" || {
+        echo "[WARN] Failed to install $dep - build may fail"
+      }
+      changed=1
+    fi
+  done
+fi
 
 # If a local nqptp .deb exists in the repo, install/upgrade it via broker.
 REPO_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
