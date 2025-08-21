@@ -460,7 +460,14 @@ main() {
     exit "$EXIT_SYSTEMD"
   fi
 
-  # Health checks
+  # If this run enqueued or applied changes, report CHANGED and skip
+  # synchronous health checks (services may still be restarting).
+  if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 ]]; then
+    emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
+    exit "$EXIT_CHANGED"
+  fi
+
+  # Health checks (only when no changes in this run)
   if ! check_nqptp_health; then
     emit_health "degraded" "$EXIT_DEGRADED" "nqptp not healthy" >/dev/null || true
     exit "$EXIT_DEGRADED"
@@ -468,11 +475,6 @@ main() {
   if ! check_avahi_raop; then
     emit_health "degraded" "$EXIT_DEGRADED" "avahi/raop not visible" >/dev/null || true
     exit "$EXIT_DEGRADED"
-  fi
-
-  if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 ]]; then
-    emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
-    exit "$EXIT_CHANGED"
   fi
   emit_health "healthy" "$EXIT_OK" "no changes" >/dev/null || true
   exit "$EXIT_OK"
