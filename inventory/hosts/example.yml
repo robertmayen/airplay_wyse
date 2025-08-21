@@ -1,0 +1,9 @@
+airplay_name: "Wyse-5070"
+nic: enp3s0
+# Optional ALSA overrides
+alsa:
+  mixer: "PCM"
+  device_num: 0
+  # vendor_id: "0x08bb"
+  # product_id: "0x2902"
+
