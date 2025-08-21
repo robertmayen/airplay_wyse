@@ -89,7 +89,49 @@ process_one() {
 
 run_pending() {
   shopt -s nullglob
-  for f in "$QUEUE"/*.cmd; do process_one "$f"; done
+  # Collect queue files and handle self-restart commands specially to avoid
+  # immediate SIGTERM thrash and StartLimit hits. If any
+  # 
+  #   /usr/bin/systemctl restart converge-broker.service
+  # 
+  # entries exist, dedupe them (keep the earliest only), execute exactly one
+  # restart, and leave all other commands for the next invocation (which will
+  # then run under the updated sandbox).
+  local files=()
+  local self_restart=()
+  local others=()
+  local f line
+  for f in "$QUEUE"/*.cmd; do
+    files+=("$f")
+  done
+  for f in "${files[@]:-}"; do
+    [[ -e "$f" ]] || continue
+    line="$(cat "$f" 2>/dev/null || true)"
+    if [[ "$line" == "/usr/bin/systemctl restart converge-broker.service" ]]; then
+      self_restart+=("$f")
+    else
+      others+=("$f")
+    fi
+  done
+
+  if (( ${#self_restart[@]} > 0 )); then
+    # Keep only the earliest self-restart; mark duplicates as ok and remove.
+    local keep="${self_restart[0]}"
+    local i base dup
+    for (( i=1; i<${#self_restart[@]}; i++ )); do
+      dup="${self_restart[$i]}"
+      base="${dup%.cmd}"
+      : > "${base}.ok" 2>/dev/null || true
+      rm -f "$dup"
+    done
+    # Execute a single restart now. This will terminate the current broker
+    # instance by design; remaining commands will be processed on the next run.
+    process_one "$keep"
+    return 0
+  fi
+
+  # No self-restart present; process all commands normally in order.
+  for f in "${others[@]:-}"; do process_one "$f"; done
 }
 
 run_pending
