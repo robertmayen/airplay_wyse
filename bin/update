@@ -23,9 +23,7 @@ write_last_update() {
 
 sync_systemd_units() { :; }
 
-# --- Unified bootstrap predicate ---
-# shellcheck disable=SC1091
-. "$REPO_DIR/lib/bootstrap.sh" >/dev/null 2>&1 || true
+# Bootstrap logic removed in minimal path; wrapper/sudoers are a prerequisite.
 
 yaml_get_target_tag() {
   local file=$1
@@ -51,18 +49,7 @@ short_host() { hostname -s 2>/dev/null || hostname; }
 main() {
   local rc=1 target_tag=""
 
-  # Ensure correct user or handle root for first-time bootstrap
   if [[ "$(id -un)" != "airplay" ]]; then
-    if [[ $(id -u) -eq 0 ]]; then
-      log "Updater invoked as root; performing bootstrap then re-exec as airplay"
-      # Try bootstrap as root
-      if bootstrap_needed; then
-        log "Bootstrap detection: sudo not configured or wrapper missing; performing bootstrap"
-        bootstrap_execute || true
-      fi
-      # Re-exec as airplay for normal flow
-      exec sudo -u airplay -E "$0" "$@"
-    fi
     echo "This script must run as user 'airplay'" >&2
     write_last_update "" 1
     exit 1
@@ -144,33 +131,10 @@ main() {
   # Sync systemd units if repo versions changed (GitOps for units)
   sync_systemd_units
 
-  # Bootstrap phase: ensure sudoers + wrapper are present for privileged transient actions
-  if ! is_bootstrapped; then
-    log "Bootstrap detection: missing capability; attempting bootstrap"
-    log "Bootstrap: executing $REPO_DIR/bin/bootstrap"
-    if [[ $(id -u) -eq 0 ]]; then
-      /bin/bash -lc "$REPO_DIR/bin/bootstrap" || true
-    else
-      sudo -n /bin/bash -lc "$REPO_DIR/bin/bootstrap" || true
-    fi
-    # Re-check and decide
-    if ! is_bootstrapped; then
-      local reasons
-      reasons=$(bootstrap_diagnose || true)
-      log "event=bootstrap_required status=failed reason='${reasons:-unknown}'"
-      write_last_update "$target_tag" 1
-      SUPPRESS_TRAP_LOG=1
-      exit 1
-    fi
-  else
-    log "Bootstrap detection: already configured (functional)"
-  fi
-
   # Package installs and unit sync handled by converge/reconcile.
 
   write_last_update "$target_tag" 0
-  log "Updater completed; starting converge"
-  "$REPO_DIR/bin/converge" || true
+  log "Updater completed"
 }
 
 trap 'rc=$?; if [[ $rc -ne 0 && ${SUPPRESS_TRAP_LOG:-0} -ne 1 ]]; then log "Updater failed rc=$rc"; fi; exit $rc' EXIT

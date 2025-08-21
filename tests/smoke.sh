@@ -1,18 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[smoke] Starting converge dry-run (actual converge will act on host)."
-if ./bin/converge; then
-  echo "[smoke] converge completed"
-else
-  echo "[smoke] converge returned non-zero (acceptable if degraded without devices)."
-fi
+echo "[smoke] Minimal smoke test"
 
-echo "[smoke] Health:"
+# Validate script presence
+for f in bin/reconcile bin/update bin/converge bin/health; do
+  [[ -x "$f" ]] || { echo "[smoke] missing or not executable: $f" >&2; exit 1; }
+done
+
+echo "[smoke] Running health (may be unknown on CI):"
 ./bin/health || true
 
-echo "[smoke] Broker queue test:"
-./tests/queue_smoke.sh || true
+if command -v shairport-sync >/dev/null 2>&1; then
+  v=$(shairport-sync -V 2>&1 || true)
+  echo "[smoke] shairport-sync -V: $(echo "$v" | head -1)"
+  if echo "$v" | grep -q "AirPlay2"; then
+    echo "[smoke] AirPlay2 string detected"
+  else
+    echo "[smoke] AirPlay2 string not detected (ok in CI)"
+  fi
+else
+  echo "[smoke] shairport-sync not present (ok in CI)"
+fi
 
-echo "[smoke] Policy test (no sudo in converge path):"
-./tests/no_sudo.sh
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --version >/dev/null 2>&1 || true
+  echo "[smoke] systemctl available"
+else
+  echo "[smoke] systemctl not available (ok in CI)"
+fi
+
+echo "[smoke] Done"

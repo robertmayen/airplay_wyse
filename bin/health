@@ -7,11 +7,11 @@ STATE_DIR="/var/lib/airplay_wyse"
 bootstrap_ok=null
 pkg_profile_ok=null
 
-# shellcheck disable=SC1091
-. "$REPO_DIR/lib/bootstrap.sh" >/dev/null 2>&1 || true
-
-if command -v sudo >/dev/null 2>&1; then
-  if is_bootstrapped; then bootstrap_ok=true; else bootstrap_ok=false; fi
+# Minimal path: wrapper/sudoers must be preinstalled.
+if [[ -x /usr/local/sbin/airplay-sd-run ]]; then
+  bootstrap_ok=true
+else
+  bootstrap_ok=false
 fi
 
 # Test pkg profile with a no-op if wrapper exists
