@@ -1,32 +1,21 @@
-# AirPlay Wyse
+# AirPlay Wyse (Minimal)
 
-GitOps-driven AirPlay audio streaming for Wyse thin clients with automatic configuration, least-privilege security, and AirPlay 2 multi-room support.
+Minimal GitOps-driven AirPlay 2 receiver for Wyse 5070 + USB DAC.
 
-## 🚀 Quick Start
+See `docs/OPERATIONS.md` for installation, tagging, health, and rollback guidance.
 
-### What This Does
-Transforms Wyse thin clients into AirPlay receivers that:
-- Appear on your iPhone/Mac for wireless audio streaming
-- Support AirPlay 2 multi-room synchronization
-- Auto-detect and configure USB DACs or onboard audio
-- Self-update from git tags with zero manual intervention
-- Run securely with minimal privileges
+Directory essentials:
+- `bin/`: `reconcile`, `update`, `converge`, `health`, `diag`, `airplay-sd-run` (install to `/usr/local/sbin/airplay-sd-run`).
+- `cfg/`: minimal templates for `shairport-sync`, Avahi, and (optionally) nqptp.
+- `systemd/`: `reconcile.service/.timer`, `converge.service`, and necessary overrides.
+- `inventory/`: `hosts/example.yml` (optional overrides for name/NIC/ALSA).
+- `tests/`: `smoke.sh` (mockable). 
 
-### Emergency Commands
-```bash
-# If something goes wrong:
-./bin/health                     # Check system status
-./bin/diag                       # Collect diagnostics
-sudo touch /etc/airplay_wyse/hold  # Stop all updates (kill switch)
-./bin/rollback v0.2.0            # Rollback to previous version
-```
+This repository intentionally omits on-device builds and auxiliary tooling to keep hosts immutable-ish and the operational path simple.
 
-## 📋 Prerequisites
-
-- Wyse thin client running Debian/Ubuntu
-- Network connectivity (same subnet as your Apple devices)
-- SSH access for initial setup
-- Git repository access (GitHub deploy key)
+## Notes
+- Debian 13 preferred (APT provides AirPlay2-capable `shairport-sync` and `nqptp`).
+- Privileged actions use a single wrapper (`/usr/local/sbin/airplay-sd-run`).
 
 ## 🛠️ Installation
 
