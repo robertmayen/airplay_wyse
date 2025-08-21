@@ -56,6 +56,7 @@
   - `svc-restart`: `systemctl daemon-reload`, enable and (re)start `nqptp.service`, then restart `shairport-sync.service`.
 - Post-check verifies `nqptp` is active and `shairport-sync -V` reports AirPlay 2; if successful, health is `healthy_changed` for this run.
 - Networking: Ensure UDP ports 319 and 320 are allowed on the LAN; these are required for NQPTP time sync.
+- Conflicts: Full PTP daemons may already bind UDP 319/320; stop them or run on a different host. Classic AirPlay 1 does not require `nqptp`.
 
 ## Release
 - Bump `VERSION`, update `CHANGELOG.md`.

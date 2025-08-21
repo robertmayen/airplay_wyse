@@ -58,6 +58,94 @@ systemd_run() {
   return $?
 }
 
+# Bootstrap sudo/sudoers and wrapper to enable privilege model
+bootstrap_sudo_config() {
+  # Returns: 0 success, 1 failed, 4 needs manual intervention
+  local need_manual=4
+  local failed=1
+
+  # Helper: check if current user (or airplay when root) can sudo systemd-run without password
+  can_sudo_nopass() {
+    if ! command -v sudo >/dev/null 2>&1; then return 1; fi
+    if [[ $(id -u) -eq 0 ]]; then
+      # As root, test from the airplay account context
+      if id -u airplay >/dev/null 2>&1; then
+        sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1
+        return $?
+      fi
+      return 1
+    else
+      sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1
+      return $?
+    fi
+  }
+
+  # Fast-path: already configured
+  if can_sudo_nopass; then
+    # Ensure wrapper exists; if root, fix it, else just warn via log.
+    if [[ ! -x /usr/local/sbin/airplay-sd-run ]]; then
+      local src="$REPO_DIR/scripts/airplay-sd-run"
+      if [[ -f "$src" && $(id -u) -eq 0 ]]; then
+        install -o root -g root -m 0755 "$src" /usr/local/sbin/airplay-sd-run || return $failed
+      elif [[ -f "$src" ]]; then
+        log "airplay-sd-run wrapper missing; will rely on direct systemd-run via sudo"
+      fi
+    fi
+    # Validate wrapper usage (best-effort)
+    if [[ $(id -u) -eq 0 ]]; then
+      sudo -u airplay -n /usr/local/sbin/airplay-sd-run svc-restart -- /bin/true >/dev/null 2>&1 || true
+    else
+      sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- /bin/true >/dev/null 2>&1 || true
+    fi
+    return $EXIT_OK
+  fi
+
+  # Not configured; if root, create minimal sudoers and install wrapper
+  if [[ $(id -u) -eq 0 ]]; then
+    # Create sudoers drop-in
+    mkdir -p /etc/sudoers.d || return $failed
+    local sdfile=/etc/sudoers.d/airplay-wyse
+    local tmp; tmp=$(mktemp)
+    {
+      echo "# AirPlay Wyse privilege model (NOPASSWD systemd-run for airplay)"
+      echo "Defaults:airplay !requiretty"
+      echo "airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run"
+    } >"$tmp"
+    install -o root -g root -m 0440 "$tmp" "$sdfile" || { rm -f "$tmp"; return $failed; }
+    rm -f "$tmp"
+    if command -v visudo >/dev/null 2>&1; then
+      if ! visudo -cf "$sdfile" >/dev/null 2>&1; then
+        log "sudoers validation failed for $sdfile"
+        return $failed
+      fi
+    fi
+    # Install wrapper
+    local src="$REPO_DIR/scripts/airplay-sd-run"
+    if [[ -f "$src" ]]; then
+      install -o root -g root -m 0755 "$src" /usr/local/sbin/airplay-sd-run || return $failed
+    else
+      log "wrapper script missing at $src; proceed without (direct systemd-run only)"
+    fi
+    # Validate from airplay context
+    if id -u airplay >/dev/null 2>&1; then
+      if ! sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1; then
+        log "sudo still not permitting NOPASSWD systemd-run for airplay"
+        return $failed
+      fi
+    fi
+    return $EXIT_OK
+  fi
+
+  # Non-root and sudo not configured: provide manual instructions
+  log "CRITICAL: sudo not configured for airplay. Bootstrap required."
+  log "Manual recovery (as root):"
+  log "  install -d -m 0755 /etc/sudoers.d"
+  log "  printf 'airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run\n' > /etc/sudoers.d/airplay-wyse"
+  log "  chmod 0440 /etc/sudoers.d/airplay-wyse && visudo -cf /etc/sudoers.d/airplay-wyse"
+  log "  install -o root -g root -m 0755 $REPO_DIR/scripts/airplay-sd-run /usr/local/sbin/airplay-sd-run"
+  return $need_manual
+}
+
 ensure_dirs() {
   # State dir may be created by provisioning; create lazily if writable.
   mkdir -p "$STATE_DIR" 2>/dev/null || true
@@ -430,37 +518,30 @@ sync_shairport_override() {
   local changed=0
   if [[ -f "$src" ]]; then
     if [[ ! -d "/etc/systemd/system/shairport-sync.service.d" ]]; then
-      enqueue_cmd /usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
+      systemd_run unit-write -- "/usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d"
       changed=1
     fi
     local dest="/etc/systemd/system/shairport-sync.service.d/override.conf"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      local ts rand cmdf inf
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
-      inf="$QUEUE_DIR/${ts}.${rand}.in"
-      echo "/usr/bin/tee $dest" >"$cmdf"
-      cp "$src" "$inf"
+      systemd_run unit-write -- "/usr/bin/install -m 0644 '$src' '$dest'"
       changed=1
     fi
   fi
   if [[ $changed -eq 1 ]]; then
-    enqueue_cmd /usr/bin/systemctl daemon-reload
-    enqueue_cmd /usr/bin/systemctl restart airplay-shairport
+    systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+    systemd_run svc-restart -- "/usr/bin/systemctl restart airplay-shairport"
   fi
   return $changed
 }
 
 ensure_nqptp_started() {
-  # If nqptp service exists, ensure it's enabled and started via broker
+  # If nqptp service exists, ensure it's enabled and started via transient privileged unit
   if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
-    # Enable if not enabled
     if ! systemctl is-enabled --quiet nqptp.service 2>/dev/null; then
-      enqueue_cmd /usr/bin/systemctl enable nqptp.service
+      systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service"
     fi
-    # Start if not active
     if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
-      enqueue_cmd /usr/bin/systemctl start nqptp.service
+      systemd_run svc-restart -- "/usr/bin/systemctl start nqptp.service"
     fi
   fi
 }
@@ -496,7 +577,7 @@ remediate_raop2() {
   local f
   shopt -s nullglob
   # Prefer explicit AP2-enabled shairport-sync builds if provided
-  for f in "$REPO_DIR"/pkg/nqptp_*.deb "$REPO_DIR"/pkg/shairport-sync*ap2*\.deb" "$REPO_DIR"/pkg/shairport-sync*raop2*\.deb"; do
+  for f in "$REPO_DIR"/pkg/nqptp_*.deb "$REPO_DIR"/pkg/shairport-sync"*ap2*".deb "$REPO_DIR"/pkg/shairport-sync"*raop2*".deb; do
     [[ -f "$f" ]] && debs+=("$f")
   done
   shopt -u nullglob
@@ -537,6 +618,95 @@ remediate_raop2() {
 
   echo $changed
   return 0
+}
+
+# Ensure AirPlay 2 (RAOP2) support by installing/activating nqptp and a RAOP2-capable shairport-sync
+# Returns: 0 (no change), 2 (changed), 10 (package error)
+ensure_airplay2_support() {
+  local changed=0
+
+  # Quick success path
+  if has_airplay2_build && nqptp_active; then
+    return $EXIT_OK
+  fi
+
+  log "Ensuring AirPlay 2 support (RAOP2 + nqptp)"
+
+  # Stop shairport via wrapper to avoid device busy during dpkg
+  systemd_run svc-restart -- "/usr/bin/systemctl stop airplay-shairport || true"
+
+  # 1) Ensure nqptp installed (prefer local .deb), enabled and active
+  if ! systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+    # Try local nqptp .deb first
+    shopt -s nullglob
+    local nqdeb=("$REPO_DIR"/pkg/nqptp_*.deb)
+    shopt -u nullglob
+    if [[ ${#nqdeb[@]} -gt 0 ]]; then
+      if ! systemd_run pkg-ensure -- "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "${nqdeb[0]}") || /usr/bin/apt-get -y -f install"; then
+        log "nqptp local install failed"
+        return $EXIT_PKG
+      fi
+      changed=1
+    else
+      if command -v apt-get >/dev/null 2>&1; then
+        if ! systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y nqptp"; then
+          log "nqptp apt install failed"
+          return $EXIT_PKG
+        fi
+        changed=1
+      fi
+    fi
+  fi
+  # Enable/start nqptp regardless
+  systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service || true"
+  systemd_run svc-restart -- "/usr/bin/systemctl restart nqptp.service || /usr/bin/systemctl start nqptp.service || true"
+
+  # 2) Ensure shairport-sync has RAOP2 capability (prefer local AP2/RAOP2 build)
+  if ! has_airplay2_build; then
+    shopt -s nullglob
+    local ss_debs=()
+    # Prefer explicit AP2/RAOP2 builds if provided
+    for f in "$REPO_DIR"/pkg/shairport-sync*ap2*.deb "$REPO_DIR"/pkg/shairport-sync*raop2*.deb; do
+      [[ -f "$f" ]] && ss_debs+=("$f")
+    done
+    shopt -u nullglob
+
+    if [[ ${#ss_debs[@]} -gt 0 ]]; then
+      if ! systemd_run pkg-ensure -- "/usr/bin/dpkg -i ${ss_debs[*]/#/$REPO_DIR\/pkg\/} || /usr/bin/apt-get -y -f install"; then
+        log "shairport-sync local RAOP2 install failed"
+        return $EXIT_PKG
+      fi
+      changed=1
+    else
+      # Fallback to distro package
+      if command -v apt-get >/dev/null 2>&1; then
+        if ! systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y shairport-sync"; then
+          log "shairport-sync apt install failed"
+          return $EXIT_PKG
+        fi
+        changed=1
+      fi
+    fi
+  fi
+
+  # Ensure override to order after nqptp is present
+  sync_shairport_override || true
+
+  # Reload units and start services
+  systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+  systemd_run svc-restart -- "/usr/bin/systemctl restart airplay-shairport || true"
+  systemd_run svc-restart -- "/usr/bin/systemctl restart airplay-avahi || true"
+
+  # Final verification
+  if ! nqptp_active || ! has_airplay2_build; then
+    log "AirPlay 2 ensure failed: nqptp_active=$(nqptp_active && echo yes || echo no), has_raop2=$(has_airplay2_build && echo yes || echo no)"
+    return $EXIT_PKG
+  fi
+
+  if [[ $changed -eq 1 ]]; then
+    return $EXIT_CHANGED
+  fi
+  return $EXIT_OK
 }
 
 apply_configs() {
@@ -610,6 +780,16 @@ check_nqptp_health() {
   return 0
 }
 
+ptp_ports_busy_note() {
+  # If ports 319/320 are already in use and nqptp is inactive, hint at conflict
+  if ! command -v ss >/dev/null 2>&1; then return 0; fi
+  local out
+  out=$(ss -lun 2>/dev/null | grep -E ':(319|320) ' || true)
+  if [[ -n "$out" ]] && ! nqptp_active; then
+    echo "; ports 319/320 busy by another service"
+  fi
+}
+
 check_avahi_raop() {
   # Consider healthy if either AirPlay (_airplay._tcp) or RAOP (_raop._tcp)
   # advertises this device by friendly name, with a fallback to hostname.
@@ -626,15 +806,23 @@ check_avahi_raop() {
   return 1
 }
 
-main() {
+converge_main() {
   ensure_dirs
-  # Ensure secure wrapper is installed before privileged actions
-  if [[ ! -x /usr/local/sbin/airplay-sd-run ]]; then
-    local src="$REPO_DIR/scripts/airplay-sd-run"
-    if [[ -f "$src" ]]; then
-      systemd_run cfg-write -- "/usr/bin/install -o root -g root -m 0755 '$src' /usr/local/sbin/airplay-sd-run"
-    fi
+
+  # Phase 1: Bootstrap sudo configuration to enable transient root actions
+  local bsrc
+  set +e
+  bootstrap_sudo_config
+  bsrc=$?
+  set -e
+  if [[ $bsrc -eq 4 ]]; then
+    emit_health "bootstrap_required" "$EXIT_INV" "sudo NOPASSWD systemd-run not configured" >/dev/null || true
+    exit "$EXIT_INV"
+  elif [[ $bsrc -eq 1 ]]; then
+    emit_health "bootstrap_failed" "$EXIT_INV" "failed to configure sudoers/wrapper" >/dev/null || true
+    exit "$EXIT_INV"
   fi
+
   held_check
   if ! load_inventory; then
     emit_health "invalid_inventory" "$EXIT_INV" "missing inventory file" >/dev/null || true
@@ -651,22 +839,28 @@ main() {
 
   # Package ensure
   PACKAGES_CHANGED=0
-  # Ensure systemd units are up to date before package actions rely on broker
   sync_systemd_units || true
   if ! apply_packages; then
     emit_health "pkg_failed" "$EXIT_PKG" "package install/update failed" >/dev/null || true
     exit "$EXIT_PKG"
   fi
 
-  # Ensure nqptp is enabled/started if present, and keep shairport override in sync
+  # Phase 2: Ensure RAOP2/AirPlay 2 support
+  RAOP2_CHANGED=0
+  set +e
+  ensure_airplay2_support
+  local erc=$?
+  set -e
+  if [[ $erc -eq $EXIT_PKG ]]; then
+    emit_health "pkg_failed" "$EXIT_PKG" "failed to ensure AirPlay 2 support" >/dev/null || true
+    exit "$EXIT_PKG"
+  elif [[ $erc -eq $EXIT_CHANGED ]]; then
+    RAOP2_CHANGED=1
+  fi
+
+  # Keep nqptp and shairport override in sync
   ensure_nqptp_started || true
   sync_shairport_override || true
-
-  # RAOP2 capability remediation (packages + units) if needed
-  RAOP2_CHANGED=0
-  if out=$(remediate_raop2); then
-    if [[ "$out" -ge 1 ]]; then RAOP2_CHANGED=1; fi
-  fi
 
   # Apply configs and possibly restart services
   set +e
@@ -681,8 +875,7 @@ main() {
     exit "$EXIT_SYSTEMD"
   fi
 
-  # If this run enqueued or applied changes, report CHANGED and skip
-  # synchronous health checks (services may still be restarting).
+  # If this run applied changes, report CHANGED and skip health checks
   if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 || ${RAOP2_CHANGED:-0} -eq 1 ]]; then
     emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
     exit "$EXIT_CHANGED"
@@ -690,10 +883,12 @@ main() {
 
   # Health checks (only when no changes in this run)
   if ! check_nqptp_health; then
-    emit_health "degraded" "$EXIT_DEGRADED" "nqptp not healthy" >/dev/null || true
+    local note
+    note=$(ptp_ports_busy_note || true)
+    emit_health "degraded" "$EXIT_DEGRADED" "nqptp not healthy${note}" >/dev/null || true
     exit "$EXIT_DEGRADED"
   fi
-  if ! has_airplay2_build; then
+  if ! has_raop2; then
     log "WARN: shairport-sync lacks AirPlay 2 (RAOP2) support - install RAOP2-enabled build"
     emit_health "degraded" "$EXIT_DEGRADED" "shairport-sync lacks AirPlay 2 (RAOP2); install RAOP2-enabled build" >/dev/null || true
     exit "$EXIT_DEGRADED"
@@ -705,5 +900,7 @@ main() {
   emit_health "healthy" "$EXIT_OK" "no changes" >/dev/null || true
   exit "$EXIT_OK"
 }
+
+main() { converge_main "$@"; }
 
 main "$@"
