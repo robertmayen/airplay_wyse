@@ -4,7 +4,7 @@ set -euo pipefail
 echo "[smoke] Minimal smoke test"
 
 # Validate script presence
-for f in bin/reconcile bin/update bin/converge bin/health; do
+for f in bin/reconcile bin/update bin/converge bin/health bin/diag bin/alsa-probe; do
   [[ -x "$f" ]] || { echo "[smoke] missing or not executable: $f" >&2; exit 1; }
 done
 
@@ -44,7 +44,7 @@ fi
 
 # shellcheck on scripts if installed
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck bin/* scripts/* || true
+  shellcheck bin/* scripts/airplay-sd-run || true
 fi
 
 echo "[smoke] Done"

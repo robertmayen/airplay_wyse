@@ -11,15 +11,17 @@ This document describes the minimal operational workflow for turning a Wyse 5070
 - Debian 13 preferred (APT provides `shairport-sync` with AirPlay 2 and `nqptp`).
 - User `airplay` exists and can run the wrapper with NOPASSWD sudo.
 - Wrapper installed:
-  - Copy `bin/airplay-sd-run` to `/usr/local/sbin/airplay-sd-run` (root-owned, 0755).
+  - Copy `scripts/airplay-sd-run` to `/usr/local/sbin/airplay-sd-run` (root-owned, 0755).
 - Sudoers drop-in (example):
   ```
   # /etc/sudoers.d/airplay-wyse
   Defaults:airplay !requiretty
   airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run, /usr/local/sbin/airplay-sd-run
   ```
+- Repository cloned to `/opt/airplay_wyse` (owned by `airplay` user).
 - Systemd units installed:
   - Copy `systemd/reconcile.*`, `systemd/converge.service` to `/etc/systemd/system/`.
+  - Copy overrides: `systemd/overrides/*/` to `/etc/systemd/system/`.
   - `systemctl daemon-reload && systemctl enable --now reconcile.timer`.
 
 ## Inventory (Optional)
