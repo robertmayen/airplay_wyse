@@ -18,6 +18,7 @@ ver() { dpkg-query -W -f='${Version}\n' "$1" 2>/dev/null | awk -F- '{print $1}';
 changed=0
 QUEUE_DIR="/run/airplay/queue"
 mkdir -p "$QUEUE_DIR" 2>/dev/null || true
+did_update=0
 
 # Ensure apt preferences directory via broker, then stage preference files via broker tee (with .in payloads)
 # Only enqueue writes when content differs or target file missing.
@@ -39,6 +40,10 @@ done
 # Package installs via broker (best-effort without apt-get update)
 for p in "${REQ_PKGS[@]}"; do
   if ! have "$p"; then
+    if [[ $did_update -eq 0 ]]; then
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      echo "/usr/bin/apt-get update" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1; did_update=1
+    fi
     ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
     echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
     continue
@@ -48,6 +53,10 @@ for p in "${REQ_PKGS[@]}"; do
   min_ver="${!min_var:-}"
   if [[ -n "$min_ver" ]]; then
     dpkg --compare-versions "$inst_ver" ge "$min_ver" || {
+      if [[ $did_update -eq 0 ]]; then
+        ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+        echo "/usr/bin/apt-get update" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1; did_update=1
+      fi
       ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
       echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1;
     }
@@ -71,6 +80,10 @@ for p in "${OPT_PKGS[@]}"; do
   fi
   cand=$(apt_candidate "$p" || echo none)
   if [[ -n "$cand" && "$cand" != "(none)" ]]; then
+    if [[ $did_update -eq 0 ]]; then
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      echo "/usr/bin/apt-get update" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1; did_update=1
+    fi
     ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
     echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
   fi

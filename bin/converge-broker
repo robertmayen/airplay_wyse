@@ -11,29 +11,31 @@ is_allowed() {
   case "$1" in
     /usr/bin/apt-get)
       shift
-      [ "${1:-}" = "-y" ] && [ "${2:-}" = "install" ] && exit 0 || true
+      # allow either `apt-get update` or `apt-get -y install ...`
+      if [ "${1:-}" = "update" ]; then return 0; fi
+      [ "${1:-}" = "-y" ] && [ "${2:-}" = "install" ] && return 0 || true
       ;;
     /usr/bin/dpkg)
       shift
-      [ "${1:-}" = "-i" ] && [[ "${2:-}" == /opt/airplay_wyse/pkg/*.deb ]] && exit 0 || true
+      [ "${1:-}" = "-i" ] && [[ "${2:-}" == /opt/airplay_wyse/pkg/*.deb ]] && return 0 || true
       ;;
     /usr/bin/systemctl)
       shift
       # allow only restarts of our stack
-      [ "${1:-}" = "restart" ] && [[ "${2:-}" == airplay-* ]] && exit 0 || true
+      [ "${1:-}" = "restart" ] && [[ "${2:-}" == airplay-* ]] && return 0 || true
       ;;
     /usr/bin/install)
       shift
       # allow only creation of apt preferences dir
-      [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ] && [ "${4:-}" = "/etc/apt/preferences.d" ] && exit 0 || true
+      [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ] && [ "${4:-}" = "/etc/apt/preferences.d" ] && return 0 || true
       ;;
     /usr/bin/tee)
       shift
       # allow only writing to apt preferences files
-      [[ "${1:-}" == /etc/apt/preferences.d/*.pref ]] && exit 0 || true
+      [[ "${1:-}" == /etc/apt/preferences.d/*.pref ]] && return 0 || true
       ;;
   esac
-  exit 1
+  return 1
 }
 
 process_one() {

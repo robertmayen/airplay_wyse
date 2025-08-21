@@ -103,14 +103,23 @@ held_check() {
 load_inventory() {
   local host=$(host_key)
   local inv="$REPO_DIR/inventory/hosts/${host}.yml"
-  [[ -f "$inv" ]] || { log "inventory missing for host $host"; return 1; }
-  INVENTORY_FILE="$inv"
+  if [[ -f "$inv" ]]; then
+    INVENTORY_FILE="$inv"
+    return 0
+  fi
+  log "inventory missing for host $host; proceeding with auto-detect defaults"
+  INVENTORY_FILE=""
+  return 0
 }
 
 yaml_get() {
   # very small helper to extract simple key: value (no nesting beyond one dot)
   local key="$1"
-  grep -E "^${key}:[[:space:]]" "$INVENTORY_FILE" | sed -E "s/^${key}:[[:space:]]*//" | tr -d '"'
+  if [[ -n "${INVENTORY_FILE:-}" && -f "$INVENTORY_FILE" ]]; then
+    grep -E "^${key}:[[:space:]]" "$INVENTORY_FILE" | sed -E "s/^${key}:[[:space:]]*//" | tr -d '"'
+  else
+    echo ""
+  fi
 }
 
 time_sync_ok() {
@@ -304,6 +313,19 @@ apply_configs() {
   local changed=0
   AIRPLAY_NAME=$(yaml_get 'airplay_name')
   AVAHI_IFACE=$(yaml_get 'nic')
+
+  # Defaults if inventory missing/empty
+  AIRPLAY_NAME=${AIRPLAY_NAME:-$(host_key)}
+  if [[ -z "${AVAHI_IFACE:-}" ]]; then
+    # Prefer default route device; fallback to first non-lo UP interface
+    if command -v ip >/dev/null 2>&1; then
+      AVAHI_IFACE=$(ip -o route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="dev"){print $(i+1); exit}}}') || true
+      if [[ -z "${AVAHI_IFACE:-}" ]]; then
+        AVAHI_IFACE=$(ip -o link show up 2>/dev/null | awk -F': ' '!/ lo:/{print $2; exit}') || true
+      fi
+    fi
+    AVAHI_IFACE=${AVAHI_IFACE:-eth0}
+  fi
 
   if ! resolve_alsa_device; then
     log "ALSA device not found (auto-detect/override)"
