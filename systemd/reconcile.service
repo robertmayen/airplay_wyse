@@ -1,0 +1,19 @@
+[Unit]
+Description=AirPlay Wyse Reconcile (update + converge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=airplay
+WorkingDirectory=/opt/airplay_wyse
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/airplay_wyse/bin/reconcile
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/airplay_wyse /opt/airplay_wyse
+
+[Install]
+WantedBy=multi-user.target
+

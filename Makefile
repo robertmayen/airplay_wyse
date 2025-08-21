@@ -36,11 +36,12 @@ diag:
 .PHONY: install-units release-notes
 
 install-units:
-	@echo "Documentation-only: install systemd unit as root"
-	@echo "  sudo install -m 0644 systemd/converge.service /etc/systemd/system/converge.service"
+	@echo "Documentation-only: install reconcile timer/service as root"
+	@echo "  sudo install -m 0644 systemd/reconcile.service /etc/systemd/system/reconcile.service"
+	@echo "  sudo install -m 0644 systemd/reconcile.timer /etc/systemd/system/reconcile.timer"
 	@echo "  sudo systemctl daemon-reload"
-	@echo "  sudo systemctl enable converge.service"
-	@echo "  sudo systemctl start converge.service"
+	@echo "  sudo systemctl enable --now reconcile.timer"
+	@echo "  sudo systemctl start reconcile.service"
 
 release-notes:
 	@echo "Reminder: releases are gated by signed, annotated tags."

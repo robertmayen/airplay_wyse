@@ -16,14 +16,12 @@ ver() { dpkg-query -W -f='${Version}\n' "$1" 2>/dev/null | awk -F- '{print $1}';
 . "$(dirname "$0")/versions.sh" >/dev/null 2>&1 || true
 
 changed=0
-QUEUE_DIR="/run/airplay/queue"
-mkdir -p "$QUEUE_DIR" 2>/dev/null || true
+systemd_run() { sudo /usr/local/sbin/airplay-sd-run pkg-ensure -- "$*"; }
 did_update=0
 
 # Ensure apt preferences directory via broker, then stage preference files via broker tee (with .in payloads)
 # Only enqueue writes when content differs or target file missing.
-ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-printf '/usr/bin/install -d -m 0755 /etc/apt/preferences.d\n' >"$QUEUE_DIR/${ts}.${rand}.cmd"
+systemd_run "/usr/bin/install -d -m 0755 /etc/apt/preferences.d"
 for pref in "$(dirname "$0")"/apt-pins.d/*.pref; do
   [[ -f "$pref" ]] || continue
   base=$(basename "$pref")
@@ -31,9 +29,7 @@ for pref in "$(dirname "$0")"/apt-pins.d/*.pref; do
   if [[ -f "$dest" ]] && cmp -s "$pref" "$dest"; then
     continue
   fi
-  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  echo "/usr/bin/tee /etc/apt/preferences.d/$base" >"$QUEUE_DIR/${ts}.${rand}.cmd"
-  cp "$pref" "$QUEUE_DIR/${ts}.${rand}.in"
+  systemd_run "/usr/bin/install -m 0644 '$pref' '/etc/apt/preferences.d/$base'"
   changed=1
 done
 
@@ -41,11 +37,9 @@ done
 for p in "${REQ_PKGS[@]}"; do
   if ! have "$p"; then
     if [[ $did_update -eq 0 ]]; then
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      echo "/usr/bin/apt-get update" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1; did_update=1
+      systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1
     fi
-    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-    echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
+    systemd_run "/usr/bin/apt-get -y install $p"; changed=1
     continue
   fi
   inst_ver=$(ver "$p")
@@ -53,12 +47,8 @@ for p in "${REQ_PKGS[@]}"; do
   min_ver="${!min_var:-}"
   if [[ -n "$min_ver" ]]; then
     dpkg --compare-versions "$inst_ver" ge "$min_ver" || {
-      if [[ $did_update -eq 0 ]]; then
-        ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-        echo "/usr/bin/apt-get update" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1; did_update=1
-      fi
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1;
+      if [[ $did_update -eq 0 ]]; then systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1; fi
+      systemd_run "/usr/bin/apt-get -y install $p"; changed=1;
     }
   fi
 done
@@ -80,12 +70,8 @@ for p in "${OPT_PKGS[@]}"; do
   fi
   cand=$(apt_candidate "$p" || echo none)
   if [[ -n "$cand" && "$cand" != "(none)" ]]; then
-    if [[ $did_update -eq 0 ]]; then
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      echo "/usr/bin/apt-get update" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1; did_update=1
-    fi
-    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-    echo "/usr/bin/apt-get -y install $p" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
+    if [[ $did_update -eq 0 ]]; then systemd_run "/usr/bin/apt-get update"; changed=1; did_update=1; fi
+    systemd_run "/usr/bin/apt-get -y install $p"; changed=1
   fi
 done
 
@@ -101,8 +87,7 @@ for deb in "$REPO_DIR"/pkg/nqptp_*.deb; do
       continue
     fi
   fi
-  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
+  systemd_run "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")"; changed=1
 done
 
 # If a local shairport-sync .deb is provided, install/upgrade it via broker too
@@ -114,8 +99,7 @@ for deb in "$REPO_DIR"/pkg/shairport-sync_*.deb; do
       continue
     fi
   fi
-  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
+  systemd_run "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")"; changed=1
 done
 
 exit $changed

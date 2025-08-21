@@ -5,13 +5,13 @@
 - Install trusted GPG pubkeys under `/etc/airplay_wyse/trusted-gpg/`.
 - Install sudoers drop-in from `security/sudoers/airplay-wyse` via visudo validation.
 - Enable systemd units:
-  - `sudo install -m0644 systemd/converge.service /etc/systemd/system/`
-  - `sudo install -m0644 systemd/converge.timer /etc/systemd/system/`
-  - `sudo systemctl daemon-reload && sudo systemctl enable --now converge.timer`
+  - `sudo install -m0644 systemd/reconcile.service /etc/systemd/system/`
+  - `sudo install -m0644 systemd/reconcile.timer /etc/systemd/system/`
+  - `sudo systemctl daemon-reload && sudo systemctl enable --now reconcile.timer`
 
 ## Operations
-- Converge now: `sudo systemctl start converge.service`
-- Check status: `journalctl -u converge.service -n 100`
+- Reconcile now: `sudo systemctl start reconcile.service`
+- Check status: `journalctl -u reconcile.service -n 100`
 - Health: `./bin/health`
 - Diagnostics: `./bin/diag`
 
@@ -117,7 +117,7 @@ Notes
 
 The updater periodically fetches signed release tags and ensures the working copy points at the desired tag before starting `converge`.
 
-- Service/Timer: `update.service` (oneshot) and `update.timer` run as `airplay` in `/opt/airplay_wyse`.
+- Service/Timer: `reconcile.service` (oneshot) and `reconcile.timer` run as `airplay` in `/opt/airplay_wyse`.
 - Timer cadence: `OnBootSec=2min`, `OnUnitActiveSec=10min`, `RandomizedDelaySec=1min`, `Persistent=true`.
 - Tag selection:
   - If the host inventory defines `target_tag: vX.Y.Z` in `inventory/hosts/$(hostname -s).yml`, the updater uses that tag (useful for canaries).
@@ -126,7 +126,7 @@ The updater periodically fetches signed release tags and ensures the working cop
   - Tags must be signed; the device must trust the signer key so `git verify-tag <tag>` succeeds (GPG or SSH signatures supported by your git build).
   - `git fetch --tags origin` uses your configured deploy key/SSH credentials.
 - Flow:
-  1) Fetch tags, 2) pick target, 3) verify signature, 4) checkout `tags/<target>` if needed, 5) `systemctl start converge.service`.
+  1) Fetch tags, 2) pick target, 3) verify signature, 4) checkout `tags/<target>` if needed, 5) run converge in the same service.
 - State: writes `/var/lib/airplay_wyse/last-update.txt` with timestamp, status, and revision.
 
 Canary via per-host `target_tag`

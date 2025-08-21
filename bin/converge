@@ -6,7 +6,6 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 STATE_DIR="/var/lib/airplay_wyse"
 RUN_DIR="/run/airplay"
-QUEUE_DIR="$RUN_DIR/queue"
 ETC_DIR="/etc/airplay_wyse"
 
 EXIT_OK=0
@@ -21,28 +20,55 @@ EXIT_SYSTEMD=11
 log() { echo "$(date --iso-8601=seconds) [converge] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-enqueue_cmd() {
-  # Write a one-line root command into the broker queue; broker executes if allow-listed.
-  local line="$*"
-  local ts rand f
-  ts=$(date +%s)
-  rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  f="$QUEUE_DIR/${ts}.${rand}.cmd"
-  printf '%s\n' "$line" >"$f"
+systemd_run() {
+  # Usage: systemd_run <profile> -- <command...>
+  local profile="$1"; shift; [[ "${1:-}" == "--" ]] && shift || true
+  if [[ -x /usr/local/sbin/airplay-sd-run ]]; then
+    sudo /usr/local/sbin/airplay-sd-run "$profile" -- "$*"
+    return $?
+  fi
+  # Bootstrap fallback for first-run: use direct systemd-run with hardened props
+  local host; host=$(hostname -s 2>/dev/null || hostname)
+  local run_id; run_id=$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')
+  local unit="airplay-tx-${host}-${profile}-${run_id}"
+  local desc="airplay-${host} ${unit} CAP=${profile} RUN_ID=${run_id}"
+  local props=(
+    --unit "$unit" --collect --quiet --wait
+    --property=Type=exec
+    --property=SyslogIdentifier=airplay-agent
+    --property=Description="$desc"
+    --property=NoNewPrivileges=yes
+    --property=ProtectHome=read-only
+    --property=ProtectSystem=strict
+    --property=PrivateTmp=yes
+    --property=CapabilityBoundingSet=
+    --property=DevicePolicy=closed
+    --property=LockPersonality=yes
+    --property=MemoryDenyWriteExecute=yes
+  )
+  case "$profile" in
+    cfg-write) props+=( --property=ReadWritePaths=/etc ) ;;
+    unit-write) props+=( --property=ReadWritePaths=/etc/systemd/system ) ;;
+    pkg-ensure) props+=( --property=ReadWritePaths=/var/cache/apt --property=ReadWritePaths=/var/lib/apt \
+                         --property=ReadWritePaths=/var/lib/dpkg --property=ReadWritePaths=/var/log \
+                         --property=ReadWritePaths=/etc/apt --property=ReadWritePaths=/opt/airplay_wyse/pkg ) ;;
+    svc-restart) : ;;
+  esac
+  sudo /usr/bin/systemd-run "${props[@]}" /bin/bash -lc "$*"
+  return $?
 }
 
 ensure_dirs() {
   # State dir may be created by provisioning; create lazily if writable.
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   mkdir -p "$STATE_DIR/hashes" 2>/dev/null || true
-  # Queue dir should be present via systemd.path MakeDirectory; fall back if missing.
-  mkdir -p "$QUEUE_DIR" 2>/dev/null || true
+  : # no queue; transient privileged actions via systemd-run
 }
 
 # GitOps: ensure systemd units on device match repo; bootstrap broker sandbox if needed.
 sync_systemd_units() {
   local changed=0
-  # Broker unit ships with required ReadWritePaths; no transient set-property needed.
+  # Ensure systemd units on device match repo; write directly via transient unit
 
   for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
     [[ -f "$src" ]] || continue
@@ -50,18 +76,32 @@ sync_systemd_units() {
     base=$(basename "$src")
     dest="/etc/systemd/system/$base"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      local ts rand cmdf inf
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
-      inf="$QUEUE_DIR/${ts}.${rand}.in"
-      echo "/usr/bin/tee $dest" >"$cmdf"
-      cp "$src" "$inf"
+      systemd_run unit-write -- \
+        "/usr/bin/install -m 0644 '$src' '$dest'"
       changed=1
     fi
   done
   if [[ $changed -eq 1 ]]; then
-    enqueue_cmd /usr/bin/systemctl daemon-reload
-    enqueue_cmd /usr/bin/systemctl restart converge-broker.path
+    systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+  fi
+  # Remove deprecated units (.path and broker) if present
+  local obsolete=(
+    /etc/systemd/system/update-done.path
+    /etc/systemd/system/converge-broker.path
+    /etc/systemd/system/converge-broker.service
+  )
+  local removed=0 u
+  for u in "${obsolete[@]}"; do
+    if [[ -f "$u" ]]; then
+      local uname; uname=$(basename "$u")
+      systemd_run svc-restart -- "/usr/bin/systemctl stop '$uname' || true"
+      systemd_run svc-restart -- "/usr/bin/systemctl disable '$uname' || true"
+      systemd_run unit-write -- "/bin/rm -f '$u'"
+      removed=1
+    fi
+  done
+  if [[ $removed -eq 1 ]]; then
+    systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
   fi
 }
 
@@ -452,19 +492,13 @@ apply_configs() {
     amixer -c "$ALSA_CARD" sset "$ALSA_MIXER" 80% unmute >/dev/null 2>&1 || true
   fi
 
-  # shairport-sync (render into tmp and request a restart via broker if needed)
+  # shairport-sync (render into tmp and request a restart via transient unit if needed)
   local tmp_ss; tmp_ss=$(mktemp)
   render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
   if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
-    # stage a broker tee to copy config (root-owned)
-    local ts rand cmdf inf
-    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-    cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
-    inf="$QUEUE_DIR/${ts}.${rand}.in"
-    echo "/usr/bin/tee /etc/shairport-sync.conf" >"$cmdf"
-    cp "$tmp_ss" "$inf"
+    systemd_run cfg-write -- "/usr/bin/install -m 0644 '$tmp_ss' /etc/shairport-sync.conf"
     changed=1
-    enqueue_cmd /usr/bin/systemctl restart airplay-shairport
+    systemd_run svc-restart -- "/usr/bin/systemctl restart airplay-shairport"
   fi
   rm -f "$tmp_ss"
 
@@ -474,19 +508,13 @@ apply_configs() {
     local tmp_av; tmp_av=$(mktemp)
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
     if [[ ! -d "/etc/avahi/avahi-daemon.conf.d" ]]; then
-      enqueue_cmd /usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
+      systemd_run cfg-write -- "/usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d"
       changed=1
     fi
     if [[ ! -f "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" ]] || ! cmp -s "$tmp_av" "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"; then
-      # stage a broker tee to copy avahi drop-in config
-      local ts rand cmdf inf
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
-      inf="$QUEUE_DIR/${ts}.${rand}.in"
-      echo "/usr/bin/tee /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" >"$cmdf"
-      cp "$tmp_av" "$inf"
+      systemd_run cfg-write -- "/usr/bin/install -m 0644 '$tmp_av' /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"
       changed=1
-      enqueue_cmd /usr/bin/systemctl restart airplay-avahi
+      systemd_run svc-restart -- "/usr/bin/systemctl restart airplay-avahi"
     fi
     rm -f "$tmp_av"
   fi
@@ -524,6 +552,13 @@ check_avahi_raop() {
 
 main() {
   ensure_dirs
+  # Ensure secure wrapper is installed before privileged actions
+  if [[ ! -x /usr/local/sbin/airplay-sd-run ]]; then
+    local src="$REPO_DIR/scripts/airplay-sd-run"
+    if [[ -f "$src" ]]; then
+      systemd_run cfg-write -- "/usr/bin/install -o root -g root -m 0755 '$src' /usr/local/sbin/airplay-sd-run"
+    fi
+  fi
   held_check
   if ! load_inventory; then
     emit_health "invalid_inventory" "$EXIT_INV" "missing inventory file" >/dev/null || true

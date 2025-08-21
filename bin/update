@@ -20,94 +20,7 @@ write_last_update() {
   } >"$LAST_UPDATE_FILE" 2>/dev/null || true
 }
 
-# Enqueue a privileged command for the broker to execute
-enqueue_cmd() {
-  local line="$*"; local ts rand f
-  ts=$(date +%s)
-  rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  mkdir -p /run/airplay/queue 2>/dev/null || true
-  f="/run/airplay/queue/${ts}.${rand}.cmd"
-  printf '%s\n' "$line" >"$f"
-}
-
-# If repo units differ from system copies, update them via broker (GitOps for units)
-sync_systemd_units() {
-  local changed=0
-  # The broker unit now includes all required ReadWritePaths statically;
-  # avoid transient set-property calls for broader compatibility across systemd versions.
-
-  for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
-    [[ -f "$src" ]] || continue
-    local base dest
-    base=$(basename "$src")
-    dest="/etc/systemd/system/$base"
-    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      # Use broker tee with payload to write root-owned unit file
-      local ts rand cmdf inf
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
-      inf="/run/airplay/queue/${ts}.${rand}.in"
-      echo "/usr/bin/tee $dest" >"$cmdf"
-      cp "$src" "$inf"
-      changed=1
-    fi
-  done
-  # Sync unit overrides (e.g., shairport-sync ordering after nqptp)
-  for src in "$REPO_DIR"/systemd/overrides/*/*.conf; do
-    [[ -f "$src" ]] || continue
-    # Map repo path systemd/overrides/<unit>.d/<file>.conf to /etc/systemd/system/<unit>.d/<file>.conf
-    local rel unitdir base dest
-    rel=${src#"$REPO_DIR/systemd/overrides/"}
-    unitdir=$(dirname "$rel")
-    base=$(basename "$src")
-    dest="/etc/systemd/system/${unitdir}/$base"
-    # Ensure target directory exists
-    local dstdir
-    dstdir="/etc/systemd/system/${unitdir}"
-    local ts rand cmdf inf
-    if [[ ! -d "$dstdir" ]]; then
-      enqueue_cmd /usr/bin/install -d -m 0755 "$dstdir"
-      changed=1
-    fi
-    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-      cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
-      inf="/run/airplay/queue/${ts}.${rand}.in"
-      echo "/usr/bin/tee $dest" >"$cmdf"
-      cp "$src" "$inf"
-      changed=1
-    fi
-  done
-  if [[ $changed -eq 1 ]]; then
-    # Daemon-reload will be applied when /etc units are next written successfully
-    enqueue_cmd /usr/bin/systemctl daemon-reload
-    enqueue_cmd /usr/bin/systemctl restart converge-broker.path
-  fi
-}
-
-# If local .debs are present in this repo, install/upgrade them via broker.
-install_attached_pkgs() {
-  local changed=0 ts rand cmdf
-  # Install nqptp first (if provided), then shairport-sync
-  shopt -s nullglob
-  for deb in "$REPO_DIR"/pkg/nqptp_*.deb; do
-    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-    cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
-    echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$cmdf"; changed=1
-  done
-  for deb in "$REPO_DIR"/pkg/shairport-sync_*.deb; do
-    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-    cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
-    echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$cmdf"; changed=1
-  done
-  # Ensure nqptp is enabled and running if present (mirror of `enable --now` without `--now`)
-  # Using two calls to fit broker allow-list.
-  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  echo "/usr/bin/systemctl enable nqptp.service" >"/run/airplay/queue/${ts}.${rand}.cmd"; changed=1
-  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
-  echo "/usr/bin/systemctl start nqptp.service" >"/run/airplay/queue/${ts}.${rand}.cmd"; changed=1
-  return $changed
-}
+sync_systemd_units() { :; }
 
 yaml_get_target_tag() {
   local file=$1
@@ -192,7 +105,7 @@ main() {
   # Ensure critical scripts are executable (defense-in-depth for filemode issues)
   for f in \
     "$REPO_DIR/bin/converge" \
-    "$REPO_DIR/bin/converge-broker" \
+    "$REPO_DIR/bin/reconcile" \
     "$REPO_DIR/bin/preflight" \
     "$REPO_DIR/bin/update" \
     "$REPO_DIR/bin/diag" \
@@ -205,15 +118,11 @@ main() {
   # Sync systemd units if repo versions changed (GitOps for units)
   sync_systemd_units
 
-  # Install any attached packages and ensure nqptp enabled/started
-  install_attached_pkgs || true
-
-  # Emit trigger for converge via path unit (no direct systemctl here)
-  install -d -m 2775 -o root -g airplay /run/airplay || true
-  : > /run/airplay/update.trigger
+  # Package installs and unit sync handled by converge/reconcile.
 
   write_last_update "$target_tag" 0
-  log "Updater completed (triggered converge)"
+  log "Updater completed; starting converge"
+  "$REPO_DIR/bin/converge" || true
 }
 
 trap 'rc=$?; if [[ $rc -ne 0 ]]; then log "Updater failed rc=$rc"; fi; exit $rc' EXIT

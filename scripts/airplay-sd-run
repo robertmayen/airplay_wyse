@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# airplay-sd-run: locked-down wrapper for systemd-run
+# Usage: airplay-sd-run <PROFILE> -- <command ...>
+# Profiles: svc-restart | cfg-write | unit-write | pkg-ensure
+
+PROFILE="${1:-}"
+shift || true
+if [[ -z "${PROFILE}" || "${1:-}" != "--" ]]; then
+  echo "USAGE: $0 <PROFILE> -- <command...>" >&2
+  exit 2
+fi
+shift # drop --
+
+case "$PROFILE" in
+  svc-restart|cfg-write|unit-write|pkg-ensure) : ;;
+  *) echo "Unknown profile: $PROFILE" >&2; exit 2 ;;
+esac
+
+host=$(hostname -s 2>/dev/null || hostname)
+if [[ -r /proc/sys/kernel/random/uuid ]]; then run_id=$(cut -d- -f1 </proc/sys/kernel/random/uuid); else run_id=$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n'); fi
+unit="airplay-tx-${host}-${PROFILE}-${run_id}"
+desc="airplay-${host} ${unit} CAP=${PROFILE} RUN_ID=${run_id}"
+
+# Baseline hardening
+props=(
+  --wait --collect
+  --unit "$unit"
+  --property=Type=exec
+  --property=SyslogIdentifier=airplay-agent
+  --property=Description="$desc"
+  --property=NoNewPrivileges=yes
+  --property=ProtectHome=read-only
+  --property=ProtectSystem=strict
+  --property=PrivateTmp=yes
+  --property=CapabilityBoundingSet=
+  --property=DevicePolicy=closed
+  --property=LockPersonality=yes
+  --property=MemoryDenyWriteExecute=yes
+)
+
+case "$PROFILE" in
+  cfg-write)
+    props+=( --property=ReadWritePaths=/etc ) ;;
+  unit-write)
+    props+=( --property=ReadWritePaths=/etc/systemd/system ) ;;
+  pkg-ensure)
+    props+=( --property=ReadWritePaths=/var/cache/apt \
+             --property=ReadWritePaths=/var/lib/apt \
+             --property=ReadWritePaths=/var/lib/dpkg \
+             --property=ReadWritePaths=/var/log \
+             --property=ReadWritePaths=/etc/apt \
+             --property=ReadWritePaths=/opt/airplay_wyse/pkg ) ;;
+  svc-restart)
+    : ;;
+esac
+
+t0=$(date +%s%3N 2>/dev/null || date +%s)
+/usr/bin/systemd-run "${props[@]}" /bin/bash -lc "$*"
+rc=$?
+t1=$(date +%s%3N 2>/dev/null || date +%s)
+if [[ ${#t0} -gt 10 || ${#t1} -gt 10 ]]; then dur=$((t1 - t0)); else dur=$(( (t1 - t0) * 1000 )); fi
+
+if command -v systemd-cat >/dev/null 2>&1; then
+  if [[ $rc -eq 0 ]]; then
+    systemd-cat -t airplay-agent echo "RESULT=OK CAP=${PROFILE} RUN_ID=${run_id} DURATION_MS=${dur} RC=${rc}"
+  else
+    systemd-cat -t airplay-agent echo "RESULT=ERR CAP=${PROFILE} RUN_ID=${run_id} DURATION_MS=${dur} RC=${rc}"
+  fi
+fi
+
+if [[ $rc -ne 0 ]]; then
+  echo "RESULT=ERR CAP=${PROFILE} RUN_ID=${run_id} RC=${rc}" >&2
+  exit $rc
+fi
+echo "RESULT=OK CAP=${PROFILE} RUN_ID=${run_id}" >&2
+exit 0
+

@@ -14,3 +14,4 @@ airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart shairport-sync.service
 airplay ALL=(root) NOPASSWD: /usr/bin/systemctl restart avahi-daemon.service
 airplay ALL=(root) NOPASSWD: /usr/bin/systemctl try-restart shairport-sync.service
 airplay ALL=(root) NOPASSWD: /usr/bin/systemctl try-restart avahi-daemon.service
+airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run
