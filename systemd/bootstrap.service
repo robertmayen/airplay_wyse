@@ -1,0 +1,18 @@
+[Unit]
+Description=AirPlay Wyse Bootstrap (sudoers + wrapper)
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/airplay_wyse/bin/bootstrap
+NoNewPrivileges=yes
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/etc /usr/local/sbin /var/lib/airplay_wyse
+WorkingDirectory=/opt/airplay_wyse
+
+[Install]
+WantedBy=multi-user.target
+

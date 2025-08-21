@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=oneshot
 User=airplay
 WorkingDirectory=/opt/airplay_wyse
+PermissionsStartOnly=true
+ExecStartPre=/opt/airplay_wyse/bin/bootstrap
 ExecStart=/opt/airplay_wyse/bin/update
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 

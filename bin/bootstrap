@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Bootstrap privileged configuration for AirPlay Wyse
+# - Install sudoers NOPASSWD for airplay → systemd-run
+# - Install /usr/local/sbin/airplay-sd-run wrapper
+# Idempotent; safe to run multiple times.
+
+REPO_DIR="/opt/airplay_wyse"
+STATE_DIR="/var/lib/airplay_wyse"
+MARKER="$STATE_DIR/bootstrap.ok"
+
+log() { echo "$(date --iso-8601=seconds) [bootstrap] $*"; }
+
+require_root() {
+  if [[ $(id -u) -ne 0 ]]; then
+    log "must run as root; skipping"
+    exit 0
+  fi
+}
+
+ensure_dirs() { mkdir -p "$STATE_DIR"; }
+
+install_sudoers() {
+  local sdfile=/etc/sudoers.d/airplay-wyse
+  mkdir -p /etc/sudoers.d
+  local tmp; tmp=$(mktemp)
+  {
+    echo "# AirPlay Wyse privilege model (NOPASSWD systemd-run for airplay)"
+    echo "Defaults:airplay !requiretty"
+    echo "airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run"
+  } >"$tmp"
+  install -o root -g root -m 0440 "$tmp" "$sdfile"
+  rm -f "$tmp"
+  if command -v visudo >/dev/null 2>&1; then
+    visudo -cf "$sdfile" >/dev/null
+  fi
+}
+
+install_wrapper() {
+  local src="$REPO_DIR/scripts/airplay-sd-run"
+  local dst=/usr/local/sbin/airplay-sd-run
+  if [[ -f "$src" ]]; then
+    install -o root -g root -m 0755 "$src" "$dst"
+  else
+    log "wrapper missing at $src; skipping"
+  fi
+}
+
+validate() {
+  if id -u airplay >/dev/null 2>&1; then
+    sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1 || {
+      log "validation failed: airplay cannot run systemd-run without password"; return 1;
+    }
+  fi
+  return 0
+}
+
+main() {
+  require_root
+  ensure_dirs
+  install_sudoers
+  install_wrapper
+  if validate; then
+    date --iso-8601=seconds >"$MARKER" 2>/dev/null || true
+    log "bootstrap complete"
+  else
+    log "bootstrap completed but validation failed"
+    exit 1
+  fi
+}
+
+main "$@"
+
