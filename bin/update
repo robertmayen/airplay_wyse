@@ -33,20 +33,8 @@ enqueue_cmd() {
 # If repo units differ from system copies, update them via broker (GitOps for units)
 sync_systemd_units() {
   local changed=0
-  # Bootstrap: expand broker's ReadWritePaths transiently via systemd (no filesystem writes needed by broker)
-  enqueue_cmd /usr/bin/systemctl set-property converge-broker.service \
-    ReadWritePaths=/run/airplay \
-    ReadWritePaths=/opt/airplay_wyse \
-    ReadWritePaths=/var/cache/apt \
-    ReadWritePaths=/var/lib/apt \
-    ReadWritePaths=/var/lib/dpkg \
-    ReadWritePaths=/var/tmp \
-    ReadWritePaths=/tmp \
-    ReadWritePaths=/etc/apt/preferences.d \
-    ReadWritePaths=/var/log/apt \
-    ReadWritePaths=/var/log/dpkg \
-    ReadWritePaths=/etc/systemd/system
-  changed=1
+  # The broker unit now includes all required ReadWritePaths statically;
+  # avoid transient set-property calls for broader compatibility across systemd versions.
 
   for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
     [[ -f "$src" ]] || continue
@@ -65,8 +53,6 @@ sync_systemd_units() {
     fi
   done
   if [[ $changed -eq 1 ]]; then
-    # Restart broker so transient set-property takes effect immediately
-    enqueue_cmd /usr/bin/systemctl restart converge-broker.service
     # Daemon-reload will be applied when /etc units are next written successfully
     enqueue_cmd /usr/bin/systemctl daemon-reload
     enqueue_cmd /usr/bin/systemctl restart converge-broker.path

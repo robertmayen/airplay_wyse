@@ -12,8 +12,8 @@ ProtectHome=read-only
 ReadWritePaths=/run/airplay /opt/airplay_wyse \
   /var/cache/apt /var/lib/apt /var/lib/dpkg \
   /var/tmp /tmp \
-  /etc/apt/preferences.d \
-  /var/log/apt /var/log/dpkg
+  /etc/apt /etc/systemd/system \
+  /var/log
 User=root
 
 [Install]
