@@ -20,6 +20,42 @@ write_last_update() {
   } >"$LAST_UPDATE_FILE" 2>/dev/null || true
 }
 
+# Enqueue a privileged command for the broker to execute
+enqueue_cmd() {
+  local line="$*"; local ts rand f
+  ts=$(date +%s)
+  rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  mkdir -p /run/airplay/queue 2>/dev/null || true
+  f="/run/airplay/queue/${ts}.${rand}.cmd"
+  printf '%s\n' "$line" >"$f"
+}
+
+# If repo units differ from system copies, update them via broker (GitOps for units)
+sync_systemd_units() {
+  local changed=0
+  for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
+    [[ -f "$src" ]] || continue
+    local base dest
+    base=$(basename "$src")
+    dest="/etc/systemd/system/$base"
+    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
+      # Use broker tee with payload to write root-owned unit file
+      local ts rand cmdf inf
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
+      inf="/run/airplay/queue/${ts}.${rand}.in"
+      echo "/usr/bin/tee $dest" >"$cmdf"
+      cp "$src" "$inf"
+      changed=1
+    fi
+  done
+  if [[ $changed -eq 1 ]]; then
+    enqueue_cmd /usr/bin/systemctl daemon-reload
+    # Restart the path unit so it picks up any changes to watcher configs
+    enqueue_cmd /usr/bin/systemctl restart converge-broker.path
+  fi
+}
+
 yaml_get_target_tag() {
   local file=$1
   awk -F: '/^target_tag\s*:/ {val=$2; sub(/^[[:space:]]+/,"",val); sub(/[[:space:]]+$/,"",val); gsub(/^"|"$/,"",val); gsub(/^\'"'"'|\'"'"'$/,"",val); print val; exit}' "$file" 2>/dev/null || true
@@ -112,6 +148,9 @@ main() {
     "$REPO_DIR/pkg/install.sh"; do
     [[ -f "$f" ]] && chmod +x "$f" 2>/dev/null || true
   done
+
+  # Sync systemd units if repo versions changed (GitOps for units)
+  sync_systemd_units
 
   # Emit trigger for converge via path unit (no direct systemctl here)
   install -d -m 2775 -o root -g airplay /run/airplay || true

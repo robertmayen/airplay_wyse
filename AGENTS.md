@@ -108,6 +108,7 @@
   - Fetches tags from origin, selects target tag (inventory override `target_tag` > highest stable `vX.Y.Z`).
   - Verifies tag signature (`git verify-tag`); aborts on failure (no converge).
   - On change, checks out `tags/<target>` and touches `/run/airplay/update.trigger`.
+  - GitOps for units: after checkout, auto-syncs `systemd/*.service|*.path` into `/etc/systemd/system/` via the broker (tee), runs `systemctl daemon-reload`, and restarts `converge-broker.path` to pick up changes. No manual steps required for unit updates.
 
 - `bin/converge` (User=airplay, NNP, restricted writes):
   - Guards: hold switch, clock/ntp sanity, inventory presence, tag verification (defense-in-depth).

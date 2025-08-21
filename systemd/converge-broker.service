@@ -9,9 +9,12 @@ ExecStart=/opt/airplay_wyse/bin/converge-broker
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/run/airplay /opt/airplay_wyse
+ReadWritePaths=/run/airplay /opt/airplay_wyse \
+  /var/cache/apt /var/lib/apt /var/lib/dpkg \
+  /var/tmp /tmp \
+  /etc/apt/preferences.d \
+  /var/log/apt /var/log/dpkg
 User=root
 
 [Install]
 WantedBy=multi-user.target
-

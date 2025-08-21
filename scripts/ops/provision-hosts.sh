@@ -118,7 +118,11 @@ ExecStart=/opt/airplay_wyse/bin/converge-broker
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/run/airplay /opt/airplay_wyse
+ReadWritePaths=/run/airplay /opt/airplay_wyse \
+  /var/cache/apt /var/lib/apt /var/lib/dpkg \
+  /var/tmp /tmp \
+  /etc/apt/preferences.d \
+  /var/log/apt /var/log/dpkg
 User=root
 
 [Install]
@@ -147,19 +151,27 @@ QUEUE=/run/airplay/queue
 
 is_allowed() {
   case "$1" in
-    /usr/bin/apt-get) shift; [ "${1:-}" = "-y" ] && [ "${2:-}" = "install" ] && return 0 ;;
+    /usr/bin/apt-get) shift; if [ "${1:-}" = "update" ]; then return 0; fi; [ "${1:-}" = "-y" ] && [ "${2:-}" = "install" ] && return 0 ;;
     /usr/bin/dpkg) shift; [ "${1:-}" = "-i" ] && [[ "${2:-}" == /opt/airplay_wyse/pkg/*.deb ]] && return 0 ;;
-    /usr/bin/systemctl) shift; [ "${1:-}" = "restart" ] && [[ "${2:-}" == airplay-* ]] && return 0 ;;
+    /usr/bin/systemctl) shift; if [ "${1:-}" = "daemon-reload" ]; then return 0; fi; if [ "${1:-}" = "restart" ]; then case "${2:-}" in airplay-*) return 0 ;; converge-broker.path) return 0 ;; esac; fi ;;
+    /usr/bin/install) shift; [ "${1:-}" = "-d" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "0755" ] && [ "${4:-}" = "/etc/apt/preferences.d" ] && return 0 ;;
+    /usr/bin/tee) shift; case "${1:-}" in /etc/apt/preferences.d/*.pref) return 0 ;; /etc/systemd/system/converge-broker.service) return 0 ;; /etc/systemd/system/converge-broker.path) return 0 ;; /etc/systemd/system/converge.service) return 0 ;; /etc/systemd/system/update.service) return 0 ;; /etc/systemd/system/update-done.path) return 0 ;; /etc/systemd/system/preflight.service) return 0 ;; esac ;;
   esac
   return 1
 }
 
+log() { systemd-cat -t airplay-broker echo "$*"; }
+
 process_one() {
-  local f="$1"; local okf="${f%.cmd}.ok"; local errf="${f%.cmd}.err"
+  local f="$1"; local okf="${f%.cmd}.ok"; local errf="${f%.cmd}.err"; local inf="${f%.cmd}.in"
   local line; line="$(cat "$f")"
   # shellcheck disable=SC2206
   args=( $line )
   if ! is_allowed "${args[@]}"; then echo "DENY: $line" >"$errf"; rm -f "$f"; return 0; fi
+  if [[ "${args[0]}" == "/usr/bin/tee" && -f "$inf" ]]; then
+    if "${args[@]}" <"$inf" 2> >(tee "$errf".tmp >&2); then : > "$okf"; rm -f "$errf".tmp "$inf"; else mv "$errf".tmp "$errf"; fi
+    rm -f "$f"; return 0
+  fi
   if "${args[@]}" 2> >(tee "$errf".tmp >&2); then : > "$okf"; rm -f "$errf".tmp; else mv "$errf".tmp "$errf"; fi
   rm -f "$f"
 }

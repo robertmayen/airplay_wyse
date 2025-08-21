@@ -22,7 +22,14 @@ is_allowed() {
     /usr/bin/systemctl)
       shift
       # allow only restarts of our stack
-      [ "${1:-}" = "restart" ] && [[ "${2:-}" == airplay-* ]] && return 0 || true
+      if [ "${1:-}" = "daemon-reload" ]; then return 0; fi
+      if [ "${1:-}" = "restart" ]; then
+        case "${2:-}" in
+          airplay-*) return 0 ;;
+          converge-broker.path) return 0 ;;
+        esac
+      fi
+      return 1
       ;;
     /usr/bin/install)
       shift
@@ -31,8 +38,17 @@ is_allowed() {
       ;;
     /usr/bin/tee)
       shift
-      # allow only writing to apt preferences files
-      [[ "${1:-}" == /etc/apt/preferences.d/*.pref ]] && return 0 || true
+      # allow writing to apt preferences and specific systemd unit files
+      case "${1:-}" in
+        /etc/apt/preferences.d/*.pref) return 0 ;;
+        /etc/systemd/system/converge-broker.service) return 0 ;;
+        /etc/systemd/system/converge-broker.path) return 0 ;;
+        /etc/systemd/system/converge.service) return 0 ;;
+        /etc/systemd/system/update.service) return 0 ;;
+        /etc/systemd/system/update-done.path) return 0 ;;
+        /etc/systemd/system/preflight.service) return 0 ;;
+      esac
+      return 1
       ;;
   esac
   return 1
