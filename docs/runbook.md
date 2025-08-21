@@ -15,6 +15,21 @@
 - Health: `./bin/health`
 - Diagnostics: `./bin/diag`
 
+## Service Restarts via Wrapper Units
+- The privilege broker only restarts allow‑listed units that match `airplay-*`.
+- Wrapper units are shipped to safely control core services:
+  - `airplay-shairport.service` → restarts `shairport-sync.service`
+  - `airplay-avahi.service` → restarts `avahi-daemon.service`
+- During converge, when configs change, the orchestrator enqueues restarts of these wrapper units. The broker executes them without broad privileges.
+- GitOps applies updates to `/etc/systemd/system/*.service` via the broker and runs `systemctl daemon-reload` automatically when units change.
+
+## RAOP/AirPlay Health Expectations
+- Health check deems the system degraded if Avahi advertisements for both `_airplay._tcp` and `_raop._tcp` are not visible for the configured `airplay_name`.
+- Quick verification:
+  - `_airplay`: `avahi-browse -rt _airplay._tcp | grep "$(grep -E '^airplay_name\s*:' inventory/hosts/$(hostname -s).yml | awk -F: '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')"`
+  - `_raop`: `avahi-browse -rt _raop._tcp | grep "$(grep -E '^airplay_name\s*:' inventory/hosts/$(hostname -s).yml | awk -F: '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')"`
+- Converge renders and deploys `/etc/shairport-sync.conf` and an Avahi drop‑in when needed; it then restarts the wrapper units so adverts should appear shortly after converge.
+
 ## Release
 - Bump `VERSION`, update `CHANGELOG.md`.
 - Create signed annotated tag `vX.Y.Z` and push.

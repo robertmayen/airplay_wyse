@@ -40,6 +40,7 @@ is_allowed() {
         case "${4:-}" in
           /etc/apt/preferences.d) return 0 ;;
           /run/systemd/system/converge-broker.service.d) return 0 ;;
+          /etc/avahi/avahi-daemon.conf.d) return 0 ;;
         esac
       fi
       return 1
@@ -53,9 +54,12 @@ is_allowed() {
         /etc/systemd/system/converge-broker.service) return 0 ;;
         /etc/systemd/system/converge-broker.path) return 0 ;;
         /etc/systemd/system/converge.service) return 0 ;;
+        /etc/systemd/system/airplay-*.service) return 0 ;;
         /etc/systemd/system/update.service) return 0 ;;
         /etc/systemd/system/update-done.path) return 0 ;;
         /etc/systemd/system/preflight.service) return 0 ;;
+        /etc/shairport-sync.conf) return 0 ;;
+        /etc/avahi/avahi-daemon.conf.d/*.conf) return 0 ;;
       esac
       return 1
       ;;

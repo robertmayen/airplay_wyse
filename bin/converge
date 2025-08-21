@@ -362,11 +362,16 @@ apply_configs() {
   # shairport-sync (render into tmp and request a restart via broker if needed)
   local tmp_ss; tmp_ss=$(mktemp)
   render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
-  if [[ -f "/etc/shairport-sync.conf" ]]; then
-    if ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
-      changed=1
-      enqueue_cmd /usr/bin/systemctl restart airplay-shairport
-    fi
+  if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
+    # stage a broker tee to copy config (root-owned)
+    local ts rand cmdf inf
+    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+    cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
+    inf="$QUEUE_DIR/${ts}.${rand}.in"
+    echo "/usr/bin/tee /etc/shairport-sync.conf" >"$cmdf"
+    cp "$tmp_ss" "$inf"
+    changed=1
+    enqueue_cmd /usr/bin/systemctl restart airplay-shairport
   fi
   rm -f "$tmp_ss"
 
@@ -375,7 +380,18 @@ apply_configs() {
     # Render to temp; copy + restart handled via broker if policy later allows.
     local tmp_av; tmp_av=$(mktemp)
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
-    if [[ -f "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" ]] && ! cmp -s "$tmp_av" "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"; then
+    if [[ ! -d "/etc/avahi/avahi-daemon.conf.d" ]]; then
+      enqueue_cmd /usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
+      changed=1
+    fi
+    if [[ ! -f "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" ]] || ! cmp -s "$tmp_av" "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"; then
+      # stage a broker tee to copy avahi drop-in config
+      local ts rand cmdf inf
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
+      inf="$QUEUE_DIR/${ts}.${rand}.in"
+      echo "/usr/bin/tee /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" >"$cmdf"
+      cp "$tmp_av" "$inf"
       changed=1
       enqueue_cmd /usr/bin/systemctl restart airplay-avahi
     fi
