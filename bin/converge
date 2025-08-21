@@ -39,6 +39,45 @@ ensure_dirs() {
   mkdir -p "$QUEUE_DIR" 2>/dev/null || true
 }
 
+# GitOps: ensure systemd units on device match repo; bootstrap broker sandbox if needed.
+sync_systemd_units() {
+  local changed=0
+  # Bootstrap: expand broker's ReadWritePaths transiently via systemd DBus
+  enqueue_cmd /usr/bin/systemctl set-property converge-broker.service \
+    ReadWritePaths=/run/airplay \
+    ReadWritePaths=/opt/airplay_wyse \
+    ReadWritePaths=/var/cache/apt \
+    ReadWritePaths=/var/lib/apt \
+    ReadWritePaths=/var/lib/dpkg \
+    ReadWritePaths=/var/tmp \
+    ReadWritePaths=/tmp \
+    ReadWritePaths=/etc/apt/preferences.d \
+    ReadWritePaths=/var/log/apt \
+    ReadWritePaths=/var/log/dpkg \
+    ReadWritePaths=/etc/systemd/system
+  changed=1
+
+  for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
+    [[ -f "$src" ]] || continue
+    local base dest
+    base=$(basename "$src")
+    dest="/etc/systemd/system/$base"
+    if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
+      local ts rand cmdf inf
+      ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+      cmdf="$QUEUE_DIR/${ts}.${rand}.cmd"
+      inf="$QUEUE_DIR/${ts}.${rand}.in"
+      echo "/usr/bin/tee $dest" >"$cmdf"
+      cp "$src" "$inf"
+      changed=1
+    fi
+  done
+  if [[ $changed -eq 1 ]]; then
+    enqueue_cmd /usr/bin/systemctl daemon-reload
+    enqueue_cmd /usr/bin/systemctl restart converge-broker.path
+  fi
+}
+
 emit_health() {
   local status="$1" code="$2" reason="$3"
   local json
@@ -396,6 +435,8 @@ main() {
 
   # Package ensure
   PACKAGES_CHANGED=0
+  # Ensure systemd units are up to date before package actions rely on broker
+  sync_systemd_units || true
   if ! apply_packages; then
     emit_health "pkg_failed" "$EXIT_PKG" "package install/update failed" >/dev/null || true
     exit "$EXIT_PKG"
