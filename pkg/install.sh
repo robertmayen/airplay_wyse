@@ -15,6 +15,9 @@ ver() { dpkg-query -W -f='${Version}\n' "$1" 2>/dev/null | awk -F- '{print $1}';
 # shellcheck disable=SC1091
 . "$(dirname "$0")/versions.sh" >/dev/null 2>&1 || true
 
+# Define REPO_DIR early before any usage
+REPO_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
+
 changed=0
 systemd_run() { sudo /usr/local/sbin/airplay-sd-run pkg-ensure -- "$*"; }
 did_update=0
@@ -108,7 +111,6 @@ if [[ $need_build_deps -eq 1 ]]; then
 fi
 
 # If a local nqptp .deb exists in the repo, install/upgrade it via broker.
-REPO_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 shopt -s nullglob
 for deb in "$REPO_DIR"/pkg/nqptp_*.deb; do
   # Compare versions to avoid re-installing the same build repeatedly
