@@ -22,6 +22,42 @@ require_root() {
 
 ensure_state_dir() { mkdir -p "$STATE_DIR" 2>/dev/null || true; }
 
+ensure_airplay_group_membership() {
+  # Ensure 'airplay' user exists and is in an elevated group (sudo/wheel)
+  if ! id -u airplay >/dev/null 2>&1; then
+    log "CRITICAL: user 'airplay' not found"
+    return 1
+  fi
+  local grp="sudo"
+  if ! getent group "$grp" >/dev/null 2>&1; then
+    if getent group wheel >/dev/null 2>&1; then
+      grp="wheel"
+    else
+      grp=""
+    fi
+  fi
+  if [[ -z "$grp" ]]; then
+    log "WARNING: neither 'sudo' nor 'wheel' group exists; skipping group membership update"
+    return 0
+  fi
+  if id -nG airplay | tr ' ' '\n' | grep -qx "$grp"; then
+    log "airplay already in $grp group"
+    return 0
+  fi
+  if usermod -a -G "$grp" airplay; then
+    # Re-check membership in a fresh view
+    if id -nG airplay | tr ' ' '\n' | grep -qx "$grp"; then
+      log "airplay user added to $grp group"
+      return 0
+    fi
+    log "WARNING: could not confirm $grp membership for airplay after update"
+    return 1
+  else
+    log "CRITICAL: failed to add airplay to $grp group"
+    return 1
+  fi
+}
+
 install_sudoers() {
   local sdfile=/etc/sudoers.d/airplay-wyse
   install -d -m 0755 /etc/sudoers.d
@@ -38,6 +74,12 @@ install_sudoers() {
     visudo -cf "$sdfile" >/dev/null
   fi
   log "sudoers configured at $sdfile"
+}
+
+check_includedir() {
+  if ! grep -Eq '^[^#]*includedir\s+/etc/sudoers\.d' /etc/sudoers 2>/dev/null; then
+    log "WARNING: /etc/sudoers missing 'includedir /etc/sudoers.d'; drop-ins may be ignored"
+  fi
 }
 
 install_wrapper() {
@@ -67,7 +109,9 @@ validate_privs() {
 main() {
   require_root
   ensure_state_dir
+  ensure_airplay_group_membership
   install_sudoers
+  check_includedir
   install_wrapper
   if validate_privs; then
     date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER" 2>/dev/null || true
