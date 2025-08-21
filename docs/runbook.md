@@ -118,3 +118,12 @@ Canary via per-host `target_tag`
   - Policy: `tests/no_sudo.sh` enforces broker-only model (no direct `sudo` in converge path).
   - Smoke: `tests/smoke.sh` runs converge and health; `tests/queue_smoke.sh` validates the broker queue processes a command.
 - Local: `make test` runs the same checks; ensure `ripgrep` is installed for the policy test.
+
+## NQPTP Packaging (Optional)
+
+On Debian where `nqptp` is not packaged, you can build a local `.deb` and include it in a signed release tag so devices auto-install it during converge.
+
+- Build dependencies on a Debian build host: `sudo apt-get install -y git autoconf automake libtool pkg-config dpkg-dev libsystemd-dev libmd-dev build-essential`
+- Build the package: `./pkg/build-nqptp.sh` (optionally `--ref vX.Y.Z`)
+- The script produces `pkg/nqptp_*.deb`. Commit it and tag a release.
+- During converge, if `pkg/nqptp_*.deb` is present on the device, the broker runs `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/nqptp_*.deb` to install/upgrade it.

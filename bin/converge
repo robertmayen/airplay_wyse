@@ -59,12 +59,28 @@ host_key() {
 }
 
 verify_signed_tag() {
-  # Best-effort verification of current checkout being an annotated signed tag.
+  # Optional GPG verification of current tag; disabled by default.
+  # Enable with AIRPLAY_VERIFY_TAGS=1 or inventory key `verify_gpg: true`.
   if ! command -v git >/dev/null; then
     log "git not found; skipping verification"
     return 0
   fi
-  local tag
+  local verify_flag tag
+  verify_flag="${AIRPLAY_VERIFY_TAGS:-}"
+  if [[ -z "$verify_flag" && -n "${INVENTORY_FILE:-}" && -f "$INVENTORY_FILE" ]]; then
+    if grep -Eiq '^verify_gpg:\s*(true|yes|1)\b' "$INVENTORY_FILE"; then
+      verify_flag=1
+    else
+      verify_flag=0
+    fi
+  fi
+  verify_flag=${verify_flag:-0}
+
+  if [[ "$verify_flag" != "1" ]]; then
+    log "GPG tag verification disabled (using SSH/Git SHA workflows)"
+    return 0
+  fi
+
   if ! tag=$(git -C "$REPO_DIR" describe --tags --exact-match 2>/dev/null); then
     log "Not on a tag; verification failed"
     return 1
@@ -249,13 +265,13 @@ check_avahi_raop() {
 main() {
   ensure_dirs
   held_check
-  if ! verify_signed_tag; then
-    emit_health "verify_failed" "$EXIT_VERIFY" "unsigned or invalid tag" >/dev/null || true
-    exit "$EXIT_VERIFY"
-  fi
   if ! load_inventory; then
     emit_health "invalid_inventory" "$EXIT_INV" "missing inventory file" >/dev/null || true
     exit "$EXIT_INV"
+  fi
+  if ! verify_signed_tag; then
+    emit_health "verify_failed" "$EXIT_VERIFY" "unsigned or invalid tag" >/dev/null || true
+    exit "$EXIT_VERIFY"
   fi
   if ! time_sync_ok; then
     emit_health "degraded" "$EXIT_DEGRADED" "time unsynced" >/dev/null || true

@@ -71,4 +71,20 @@ for p in "${OPT_PKGS[@]}"; do
   fi
 done
 
+# If a local nqptp .deb exists in the repo, install/upgrade it via broker.
+REPO_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
+shopt -s nullglob
+for deb in "$REPO_DIR"/pkg/nqptp_*.deb; do
+  # Compare versions to avoid re-installing the same build repeatedly
+  deb_ver=$(dpkg-deb -f "$deb" Version 2>/dev/null || echo "")
+  if have nqptp; then
+    inst_ver=$(ver nqptp)
+    if [[ -n "$deb_ver" ]] && dpkg --compare-versions "$inst_ver" ge "$deb_ver"; then
+      continue
+    fi
+  fi
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$QUEUE_DIR/${ts}.${rand}.cmd"; changed=1
+done
+
 exit $changed

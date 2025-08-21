@@ -72,10 +72,25 @@ main() {
   fi
   log "Target tag: $target_tag"
 
-  if ! git verify-tag "$target_tag"; then
-    log "git verify-tag failed for $target_tag"
-    write_last_update "$target_tag" 1
-    exit 1
+  # Optional GPG verification (disabled by default). Enable with AIRPLAY_VERIFY_TAGS=1
+  # or by setting `verify_gpg: true` in the host inventory file.
+  verify_flag="${AIRPLAY_VERIFY_TAGS:-}"
+  if [[ -z "$verify_flag" && -f "$inv" ]]; then
+    if grep -Eiq '^verify_gpg:\s*(true|yes|1)\b' "$inv"; then
+      verify_flag=1
+    else
+      verify_flag=0
+    fi
+  fi
+  verify_flag=${verify_flag:-0}
+  if [[ "$verify_flag" == "1" ]]; then
+    if ! git verify-tag "$target_tag"; then
+      log "git verify-tag failed for $target_tag"
+      write_last_update "$target_tag" 1
+      exit 1
+    fi
+  else
+    log "GPG tag verification disabled (using SSH/Git SHA workflows)"
   fi
 
   if current_commit_matches_tag "$target_tag"; then
