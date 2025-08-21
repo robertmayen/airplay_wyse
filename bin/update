@@ -33,15 +33,17 @@ check_sudo_group() {
 }
 
 check_sudoers_file() {
-  [[ -f /etc/sudoers.d/airplay-wyse ]] && {
-    if command -v visudo >/dev/null 2>&1; then visudo -cf /etc/sudoers.d/airplay-wyse >/dev/null 2>&1; else return 0; fi
-  }
+  # Airplay cannot read visudo on strict perms; only check existence here
+  local f=/etc/sudoers.d/airplay-wyse
+  [[ -f "$f" ]]
 }
 
 check_wrapper() { [[ -x /usr/local/sbin/airplay-sd-run ]]; }
 
 check_sudo_access() {
-  sudo -u airplay -n sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1
+  # We are already running as airplay; do not nest sudo -u airplay
+  sudo -n /usr/bin/systemd-run --version >/dev/null 2>&1 \
+    || sudo -n /usr/local/sbin/airplay-sd-run svc-restart -- /bin/true >/dev/null 2>&1
 }
 can_systemd_run_nopass() {
   # Test whether current context can run systemd-run without password
@@ -60,11 +62,12 @@ has_wrapper() {
 bootstrap_needed() {
   if force_bootstrap; then return 0; fi
   local ok_group=1 ok_sudoers=1 ok_wrapper=1 ok_access=1
-  check_sudo_group && ok_group=0 || ok_group=1
-  check_sudoers_file && ok_sudoers=0 || ok_sudoers=1
-  check_wrapper && ok_wrapper=0 || ok_wrapper=1
-  check_sudo_access && ok_access=0 || ok_access=1
-  # Log details for debugging
+  local rc
+  check_sudo_group; rc=$?; [[ $rc -eq 0 ]] && ok_group=0 || ok_group=1; log "DEBUG: check_sudo_group rc=$rc"
+  check_sudoers_file; rc=$?; [[ $rc -eq 0 ]] && ok_sudoers=0 || ok_sudoers=1; log "DEBUG: check_sudoers_file rc=$rc"
+  check_wrapper; rc=$?; [[ $rc -eq 0 ]] && ok_wrapper=0 || ok_wrapper=1; log "DEBUG: check_wrapper rc=$rc"
+  check_sudo_access; rc=$?; [[ $rc -eq 0 ]] && ok_access=0 || ok_access=1; log "DEBUG: check_sudo_access rc=$rc"
+  # Log details (1 means pass, 0 means fail)
   log "Bootstrap detect: group=$((ok_group==0)) sudoers=$((ok_sudoers==0)) wrapper=$((ok_wrapper==0)) access=$((ok_access==0))"
   # Need bootstrap if any check fails
   if [[ $ok_group -ne 0 || $ok_sudoers -ne 0 || $ok_wrapper -ne 0 || $ok_access -ne 0 ]]; then
