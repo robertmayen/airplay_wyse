@@ -6,7 +6,6 @@ systemctl status --no-pager converge.service || true
 echo "===== end status ====="
 
 echo
-echo "===== converge diagnostics: recent logs (last 150) ====="
-journalctl -u converge.service -n 150 --no-pager || true
+echo "===== converge diagnostics: recent logs (last 200) ====="
+journalctl -u converge.service -n 200 --no-pager || true
 echo "===== end recent logs ====="
-

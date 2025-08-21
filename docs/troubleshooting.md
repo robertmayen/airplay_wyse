@@ -7,9 +7,9 @@
 - Unintended restarts: check hashes in `/var/lib/airplay_wyse/hashes` and journal for diffs.
 
 ## Converge failed → run ./bin/diag-converge
-- Use `./bin/diag-converge` to quickly inspect the converge unit and the last 150 log lines:
+- Use `./bin/diag-converge` to quickly inspect the converge unit and the last 200 log lines:
   - Shows `systemctl status --no-pager converge.service`.
-  - Shows `journalctl -u converge.service -n 150 --no-pager`.
+  - Shows `journalctl -u converge.service -n 200 --no-pager`.
   - No additional sudo is required beyond repo defaults.
   - If you see permission errors reading logs, either add your user to the `adm` or `systemd-journal` group, or run with `sudo journalctl`.
 ## Signed tag verification failures
@@ -23,11 +23,10 @@
 
 ## Updater failures
 
-- verify-tag failed: device lacks maintainer GPG public key or tag is unsigned/untrusted.
+- verify-tag failed: device lacks maintainer GPG public key or tag is unsigned/untrusted (when verification enabled).
 - No matching SemVer: repository has no `vX.Y.Z` tags; push a signed release tag.
-- Network/SSH/permissions: deploy key missing, remote denied, or no network; check `git fetch --tags origin` output and SSH config.
+- Network/SSH/permissions: deploy key missing, remote denied, or no network; check `git fetch --tags --force --prune --prune-tags origin` output and SSH config.
 - Checkout failed: local changes prevent checkout; ensure working copy is clean (converge and updater assume no local edits).
-- Systemd start failed: `systemctl start converge.service` requires the sudoers entry for `airplay` on the device.
 
 ## Converge fails with “sudo: The no new privileges flag is set”
 - Cause: unit had NoNewPrivileges=true which forbids privilege escalation.
@@ -41,11 +40,9 @@ Note: If your distro mounts `/opt` with `noexec`, converge will fail with exit 2
 - Fix: updater uses 'sudo systemctl …' and sudoers must include the exact path (/usr/bin/systemctl). Validate with `visudo -cf /etc/sudoers.d/airplay-wyse`.
 - See also: systemd exit 203/EXEC indicates non-executable or wrong interpreter for scripts.
 
-## Broker NAMESPACE errors (status=226/NAMESPACE)
-- Cause: `ProtectSystem=strict` plus `ReadWritePaths` pointing at missing directories causes mount namespace setup to fail.
-- Fix: ensure the broker unit includes only existing parents or broaden to `/etc` and `/var/log`. In this repo, `converge-broker.service` uses:
-  - `ReadWritePaths=/run/airplay /opt/airplay_wyse /var/cache/apt /var/lib/apt /var/lib/dpkg /var/tmp /tmp /etc /var/log`
-  - GitOps sync updates `/etc/systemd/system` and runs `daemon-reload` automatically.
+## Transient unit NAMESPACE errors (status=226/NAMESPACE)
+- Cause: `ProtectSystem=strict` plus `ReadWritePaths` pointing at missing directories causes mount namespace setup to fail for transient actions.
+- Fix: ensure only existing parents are included in `ReadWritePaths`. The wrapper sets minimal paths for each capability; verify logs with `journalctl --unit 'airplay-*'`.
 
 ## RAOP “not visible” but device appears in avahi-browse
 - Cause: timing and matching policy. The health check now:

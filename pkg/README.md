@@ -7,10 +7,10 @@ Attach Debian packages to a signed tag under `pkg/` to have devices install or u
 - `shairport-sync_*.deb` — AirPlay receiver; build with RAOP2 support for AirPlay 2
 
 ## How devices install packages
-- `pkg/install.sh` checks APT and local `pkg/*.deb` files and enqueues broker installs:
+- `pkg/install.sh` checks APT and local `pkg/*.deb` files and invokes privileged actions via the transient `pkg-ensure` profile (no arbitrary sudo):
   - `/usr/bin/apt-get update` + `/usr/bin/apt-get -y install <pkg>` for repo packages
   - `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/<file>.deb` for local artifacts in the tag
-- The root broker processes the queue with a strict allow‑list; no arbitrary sudo.
+  - All commands run inside hardened `systemd-run` transient units via `/usr/local/sbin/airplay-sd-run`.
 
 ## Building shairport-sync with AirPlay 2
 1. Install build deps on a Debian build host:

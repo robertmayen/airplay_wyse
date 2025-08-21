@@ -474,6 +474,12 @@ has_airplay2_build() {
   echo "$v" | grep -Eqi 'Air[[:space:]]*Play[[:space:]]*2|RAOP2|NQPTP' && return 0 || return 1
 }
 
+# Compatibility wrapper: preferred name
+has_raop2() { has_airplay2_build; }
+
+# nqptp activity check
+nqptp_active() { systemctl is-active --quiet nqptp.service 2>/dev/null; }
+
 # Remediate missing RAOP2 capability (install/start nqptp; upgrade shairport-sync)
 remediate_raop2() {
   local need=0 changed=0

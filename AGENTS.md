@@ -25,15 +25,15 @@
   - No `.path` watchers; no queue/broker.
 
 ## System Logic
-- Update: fetch tags, select target (inventory `target_tag` or highest SemVer), optionally verify signature, checkout tag.
+- Update: fetch tags with pruning, select target (inventory `target_tag` or highest SemVer), optional tag verify, checkout tag.
 - Converge phases:
-  - Guards: hold switch (`/etc|/var/lib/airplay_wyse/hold`), time sync sanity, inventory/tag verify.
+  - Guards: hold switch (`/etc|/var/lib/airplay_wyse/hold`), time sync sanity, inventory and tag verify.
   - Inventory: derive `AIRPLAY_NAME`, `AVAHI_IFACE`, and ALSA overrides.
   - ALSA detection: prefer USB; fallback to first playback card. Validate candidates by briefly opening PCM (tolerates in‑use/permissions), choose sensible mixer from common controls, unmute + set to 80%.
   - Templates: render `cfg/*.tmpl` and deploy to `/etc` via hardened transient units.
-  - Packages: ensure `shairport-sync`, `avahi-*`, `jq`, `alsa-utils`; optionally install AP2‑capable `shairport-sync_*.deb` and `nqptp_*.deb` from `pkg/`.
-  - Services: restart via wrapper units (`airplay-shairport`, `airplay-avahi`) under a restart‑only profile.
-  - Health: write JSON/txt; if changes occurred this run, emit `healthy_changed` and skip synchronous visibility checks. Otherwise, require adverts.
+  - Packages: ensure `shairport-sync`, `avahi-*`, `jq`, `alsa-utils`; automatically remediate AirPlay 2 by installing `nqptp` and AP2‑capable `shairport-sync` from `pkg/` or APT.
+  - Services: restart via wrapper units (`airplay-shairport`, `airplay-avahi`) using the `svc-restart` profile.
+  - Health: write JSON/txt; if changes occurred this run, emit `healthy_changed` and skip synchronous visibility checks. Otherwise, require RAOP/AirPlay adverts.
 
 ## Privilege Model (Transient Root Actions)
 - Agent runs as `airplay` with `NoNewPrivileges` and `ProtectSystem=strict`.
@@ -53,12 +53,14 @@
 - RAOP/AirPlay visibility: healthy if either `_airplay._tcp` or `_raop._tcp` advertises the friendly name (case‑insensitive) or host shortname. Skipped on runs that made changes.
 - Logs: `journalctl -u reconcile.service -u update.service` and `journalctl --unit 'airplay-*'` for transient actions.
 - Health snapshot: `/var/lib/airplay_wyse/last-health.json` and `.txt`.
+- Diagnostics: `./bin/diag-converge` shows `converge.service` status and the last 150 log lines. Use `sudo journalctl` if not in `adm/systemd-journal`.
 
 ## Systemd Units
 - `reconcile.timer`: periodic; triggers `reconcile.service` (single agent loop).
 - `reconcile.service`: oneshot; runs `bin/reconcile` as `airplay`.
 - Wrapper units: `airplay-shairport.service`, `airplay-avahi.service` to safely restart core services.
 - Legacy `.path` and broker units were removed; converge prunes on-device remnants.
+ - `converge.service`: Type=oneshot with `SuccessExitStatus=2 3 6 10 11` so semantic non‑zero exits are treated as success by systemd.
 
 ## Inventory Schema (practical subset)
 - `airplay_name` (string) — advertised name; default host shortname.
@@ -69,8 +71,12 @@
 - `target_tag` (string) — pin/canary.
 
 ## Security Notes
-- Devices must trust the maintainer’s signing key if tag verification is enabled.
+- Tag verification is optional and can be enabled per host; devices must trust the maintainer’s signing key if enabled.
 - Sudoers: allow `airplay` to run `/usr/bin/systemd-run` (NOPASSWD) only; do not grant general shells.
+
+## Release Policy
+- Never retcon a published tag. Use a new annotated/signed SemVer tag (e.g., bump to `v0.2.1`).
+- Devices fetch with `--force --prune --prune-tags` to stay in sync with the remote tag state.
 
 ## Operational Tips
 - Prefer a VM for testing host‑affecting changes.

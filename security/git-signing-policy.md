@@ -1,11 +1,10 @@
 # Signed Tag Policy
 
-- Devices verify that the current checkout is an annotated, signed tag.
-- Only verified tags are considered deployable. Unsigned or unverifiable refs cause converge to exit with code 5.
-- Trusted GPG public keys are provisioned out-of-band on devices (see `security/keys/README.md`).
-- Release process creates a signed annotated tag `vX.Y.Z` matching the `VERSION` file.
-Devices require your GPG public key installed locally for `git verify-tag`.
+- Tag verification on devices is optional and can be enabled per host (inventory `verify_gpg: true`) or via `AIRPLAY_VERIFY_TAGS=1`.
+- When enabled, converge/updater require the current checkout to be an annotated, signed tag; verification failures exit with code 5.
+- Trusted GPG public keys should be provisioned out-of-band on devices (see `security/keys/README.md`).
+- Release process should create annotated, signed tags `vX.Y.Z` matching the `VERSION` file.
 
-- Release tags must be annotated and signed.
-- On-device verification uses `git verify-tag` and therefore needs the signer’s public key in the local keyring.
-- Install the key via `gpg --import maintainer.pub` as part of provisioning.
+Release discipline
+- Never rewrite/retcon a published tag. For fixes, create a new SemVer tag (e.g., bump `v0.2.0` → `v0.2.1`).
+- Devices fetch tags with pruning (`git fetch --tags --force --prune --prune-tags`) to synchronize remote tag state and drop stale/moved tags.

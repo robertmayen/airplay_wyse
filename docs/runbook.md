@@ -16,12 +16,11 @@
 - Diagnostics: `./bin/diag`
 
 ## Service Restarts via Wrapper Units
-- The privilege broker only restarts allow‑listed units that match `airplay-*`.
-- Wrapper units are shipped to safely control core services:
+- Wrapper units safely control core services:
   - `airplay-shairport.service` → restarts `shairport-sync.service`
   - `airplay-avahi.service` → restarts `avahi-daemon.service`
-- During converge, when configs change, the orchestrator enqueues restarts of these wrapper units. The broker executes them without broad privileges.
-- GitOps applies updates to `/etc/systemd/system/*.service` via the broker and runs `systemctl daemon-reload` automatically when units change.
+- During converge, when configs change, the orchestrator restarts these wrapper units via transient `svc-restart` actions.
+- Unit files and drop‑ins are synchronized via transient `unit-write`, followed by `systemctl daemon-reload`.
 
 ## RAOP/AirPlay Health Expectations
 - Health check deems the system degraded if Avahi advertisements for both `_airplay._tcp` and `_raop._tcp` are not visible for the configured `airplay_name`.
@@ -134,8 +133,8 @@ The updater periodically fetches signed release tags and ensures the working cop
   - If the host inventory defines `target_tag: vX.Y.Z` in `inventory/hosts/$(hostname -s).yml`, the updater uses that tag (useful for canaries).
   - Otherwise, it selects the highest SemVer tag matching `^v\d+\.\d+\.\d+$` (pre-releases like `-rc1` are ignored).
 - Security:
-  - Tags must be signed; the device must trust the signer key so `git verify-tag <tag>` succeeds (GPG or SSH signatures supported by your git build).
-  - `git fetch --tags origin` uses your configured deploy key/SSH credentials.
+  - Tag verification is optional per host; when enabled, the device must trust the signer key so `git verify-tag <tag>` succeeds.
+  - `git fetch --tags --force --prune --prune-tags origin` uses your configured deploy key/SSH credentials.
 - Flow:
   1) Fetch tags, 2) pick target, 3) verify signature, 4) checkout `tags/<target>` if needed, 5) run converge in the same service.
 - State: writes `/var/lib/airplay_wyse/last-update.txt` with timestamp, status, and revision.
@@ -158,9 +157,9 @@ Canary via per-host `target_tag`
 
 - GitHub Actions workflow: `.github/workflows/ci.yml` runs on push/PR.
 - Checks:
-  - Policy: `tests/no_sudo.sh` enforces broker-only model (no direct `sudo` in converge path).
-  - Smoke: `tests/smoke.sh` runs converge and health; `tests/queue_smoke.sh` validates the broker queue processes a command.
-- Local: `make test` runs the same checks; ensure `ripgrep` is installed for the policy test.
+  - Policy: `tests/no_sudo.sh` enforces no direct `sudo` in the converge path.
+  - Smoke: `tests/smoke.sh` runs converge and health.
+- Local: `make test` runs the same checks; ensure `ripgrep` is installed.
 
 ## NQPTP Packaging (Optional)
 
@@ -169,4 +168,4 @@ On Debian where `nqptp` is not packaged, you can build a local `.deb` and includ
 - Build dependencies on a Debian build host: `sudo apt-get install -y git autoconf automake libtool pkg-config dpkg-dev libsystemd-dev libmd-dev build-essential`
 - Build the package: `./pkg/build-nqptp.sh` (optionally `--ref vX.Y.Z`)
 - The script produces `pkg/nqptp_*.deb`. Commit it and tag a release.
-- During converge, if `pkg/nqptp_*.deb` is present on the device, the broker runs `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/nqptp_*.deb` to install/upgrade it.
+- During converge, if `pkg/nqptp_*.deb` is present on the device, a transient `pkg-ensure` action runs `/usr/bin/dpkg -i /opt/airplay_wyse/pkg/nqptp_*.deb` to install/upgrade it.
