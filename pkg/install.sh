@@ -21,15 +21,25 @@ REPO_DIR="$(cd "$(dirname "$0")"/.. && pwd)"
 changed=0
 systemd_run() { sudo /usr/local/sbin/airplay-sd-run pkg-ensure -- "$*"; }
 
-# Wrapper to run apt operations with structured error on failure
+# Wrapper to run apt operations inside transient unit; on failure surface first error line from the unit log
 apt_run() {
   local stage="$1"; shift
   local cmd="$*"
-  if ! systemd_run "$cmd"; then
-    # Emit a concise, structured summary for journald scraping; details live in the transient unit logs
-    echo "event=apt_error code=100 stage=${stage} cmd='${cmd}'" >&2
+  local out rc log
+  set +e
+  out=$(sudo /usr/local/sbin/airplay-sd-run pkg-ensure -- "$cmd" 2>&1)
+  rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    log=$(echo "$out" | awk -F'LOG_PATH=' '/RUN_ID=.*LOG_PATH=/{print $2}' | awk '{print $1}' | tail -n1)
+    local first=""
+    if [[ -n "$log" && -r "$log" ]]; then
+      first=$(grep -E "^(E:|Err:|W:|Failed to|Reading package lists|Could not|Temporary failure|Certificate verification failed)" "$log" | head -n1)
+    fi
+    echo "event=apt_error code=100 stage=${stage} reason='${first:-unknown}' cmd='${cmd}'" >&2
     return 100
   fi
+  return 0
 }
 did_update=0
 

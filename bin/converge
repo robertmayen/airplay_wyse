@@ -55,6 +55,7 @@ systemd_run() {
     pkg-ensure) props+=( --property=ReadWritePaths=/var/cache/apt --property=ReadWritePaths=/var/lib/apt \
                          --property=ReadWritePaths=/var/lib/dpkg --property=ReadWritePaths=/var/log \
                          --property=ReadWritePaths=/etc/apt --property=ReadWritePaths=/opt/airplay_wyse/pkg \
+                         --property=ReadWritePaths=/var/lib/airplay_wyse \
                          --property=ReadWritePaths=/tmp --property=ReadWritePaths=/var/tmp \
                          --property=Environment=DEBIAN_FRONTEND=noninteractive \
                          --property=Environment=APT_LISTCHANGES_FRONTEND=none \
