@@ -23,6 +23,7 @@ is_allowed() {
       shift
       # allow only restarts of our stack
       if [ "${1:-}" = "daemon-reload" ]; then return 0; fi
+      if [ "${1:-}" = "set-property" ] && [ "${2:-}" = "converge-broker.service" ]; then return 0; fi
       if [ "${1:-}" = "restart" ]; then
         case "${2:-}" in
           airplay-*) return 0 ;;
