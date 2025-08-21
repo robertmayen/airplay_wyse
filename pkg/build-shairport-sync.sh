@@ -33,11 +33,13 @@ if [[ -n "$GIT_REF" ]]; then git checkout "$GIT_REF"; fi
 echo "[build-shairport] Preparing and building…"
 autoreconf -fi
 ./configure \
-  --with-alsa \
-  --with-avahi \
   --with-ssl=openssl \
+  --with-avahi \
+  --with-alsa \
+  --with-systemd \
   --with-soxr \
   --with-metadata \
+  --with-convolution \
   --with-dbus \
   --with-raop2
 
@@ -88,4 +90,3 @@ else
 fi
 
 exit 0
-

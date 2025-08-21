@@ -1,0 +1,21 @@
+--- a/docs/runbook.md
++++ b/docs/runbook.md
+@@ -55,11 +55,13 @@ verify_flag=${verify_flag:-0}
+ - To force a specific device, set inventory overrides (`alsa.vendor_id`, `alsa.product_id`, optional `alsa.serial`, `alsa.device_num`, `alsa.mixer`).
+ 
+ ## AirPlay 2 Support
+-- Install `nqptp` for multi‑room sync. The converge path now enables/starts `nqptp.service` automatically when present and orders `shairport-sync` after it via a unit override.
+-- The Debian `shairport-sync` package may not include AirPlay 2 (RAOP2). To enable AirPlay 2, attach a locally built `pkg/shairport-sync_*.deb` compiled with `--with-raop2` to a signed tag. Devices will install/upgrade it automatically during converge.
+-- Helper: use `pkg/build-shairport-sync.sh` on a Debian build host to produce a RAOP2‑enabled `.deb`.
+-- Health: if `shairport-sync` lacks AirPlay 2 support, converge marks the system degraded with reason `shairport-sync missing AirPlay 2 (RAOP2)`.
+-- No local manual steps are required — the broker installs packages and converge deploys configs and restarts services.
++- **Multi-room sync:** Install `nqptp` for AirPlay 2 time synchronization. The converge path enables/starts `nqptp.service` automatically when present and orders `shairport-sync` after it via a systemd override (`Requires=nqptp.service`).
++- **RAOP2-enabled builds:** Debian's stock `shairport-sync` package may lack AirPlay 2 (RAOP2) support. To enable AirPlay 2:
++  1. Build a RAOP2-enabled package: Run `pkg/build-shairport-sync.sh` on a Debian build host (produces `pkg/shairport-sync_*.deb` with `--with-raop2`, `--with-convolution`, and all required features).
++  2. Attach the `.deb` to your signed release tag or let CI attach it.
++  3. The updater (`bin/update`) automatically runs `dpkg -i` for any `pkg/*.deb` files found in the repo.
++- **Health monitoring:** If `shairport-sync -V` doesn't report "AirPlay 2" or "RAOP2", converge marks the system degraded with reason `shairport-sync lacks AirPlay 2 (RAOP2); install RAOP2-enabled build`.
++- **Verification:** Check AP2 status with `shairport-sync -V | grep -E 'AirPlay 2|RAOP2'` and nqptp with `systemctl status nqptp`.
++- **Zero touch:** No manual steps required on devices — the broker installs packages and converge deploys configs and restarts services automatically.
+ 
+ ## Release

@@ -1,0 +1,19 @@
+--- a/pkg/build-shairport-sync.sh
++++ b/pkg/build-shairport-sync.sh
+@@ -33,11 +33,14 @@ if [[ -n "$GIT_REF" ]]; then git checkout "$GIT_REF"; fi
+ echo "[build-shairport] Preparing and building…"
+ autoreconf -fi
+ ./configure \
++  --with-ssl=openssl \
++  --with-avahi \
+   --with-alsa \
+-  --with-avahi \
+-  --with-ssl=openssl \
++  --with-systemd \
+   --with-soxr \
+   --with-metadata \
++  --with-convolution \
+   --with-dbus \
+   --with-raop2
+ 
+ # Build a Debian package if supported; otherwise create a simple .deb

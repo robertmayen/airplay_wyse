@@ -85,6 +85,30 @@ sync_systemd_units() {
   fi
 }
 
+# If local .debs are present in this repo, install/upgrade them via broker.
+install_attached_pkgs() {
+  local changed=0 ts rand cmdf
+  # Install nqptp first (if provided), then shairport-sync
+  shopt -s nullglob
+  for deb in "$REPO_DIR"/pkg/nqptp_*.deb; do
+    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+    cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
+    echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$cmdf"; changed=1
+  done
+  for deb in "$REPO_DIR"/pkg/shairport-sync_*.deb; do
+    ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+    cmdf="/run/airplay/queue/${ts}.${rand}.cmd"
+    echo "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "$deb")" >"$cmdf"; changed=1
+  done
+  # Ensure nqptp is enabled and running if present (mirror of `enable --now` without `--now`)
+  # Using two calls to fit broker allow-list.
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  echo "/usr/bin/systemctl enable nqptp.service" >"/run/airplay/queue/${ts}.${rand}.cmd"; changed=1
+  ts=$(date +%s); rand=$(od -An -N2 -tx2 /dev/urandom | tr -d ' \n')
+  echo "/usr/bin/systemctl start nqptp.service" >"/run/airplay/queue/${ts}.${rand}.cmd"; changed=1
+  return $changed
+}
+
 yaml_get_target_tag() {
   local file=$1
   awk -F: '/^target_tag\s*:/ {val=$2; sub(/^[[:space:]]+/,"",val); sub(/[[:space:]]+$/,"",val); gsub(/^"|"$/,"",val); gsub(/^\'"'"'|\'"'"'$/,"",val); print val; exit}' "$file" 2>/dev/null || true
@@ -180,6 +204,9 @@ main() {
 
   # Sync systemd units if repo versions changed (GitOps for units)
   sync_systemd_units
+
+  # Install any attached packages and ensure nqptp enabled/started
+  install_attached_pkgs || true
 
   # Emit trigger for converge via path unit (no direct systemctl here)
   install -d -m 2775 -o root -g airplay /run/airplay || true
