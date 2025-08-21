@@ -4,30 +4,49 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 STATE_DIR="/var/lib/airplay_wyse"
 
-bootstrap_ok=null
-pkg_profile_ok=null
+status=0
 
-# Minimal path: wrapper/sudoers must be preinstalled.
-if [[ -x /usr/local/sbin/airplay-sd-run ]]; then
-  bootstrap_ok=true
+version_str=""
+if command -v shairport-sync >/dev/null 2>&1; then
+  version_str=$(shairport-sync -V 2>&1 | head -1 || true)
+fi
+
+ap2=false
+if echo "$version_str" | grep -q "AirPlay2"; then ap2=true; fi
+
+nqptp_active=false
+if systemctl is-active --quiet nqptp 2>/dev/null; then nqptp_active=true; fi
+
+mdns_airplay=false
+mdns_raop=false
+if command -v avahi-browse >/dev/null 2>&1; then
+  avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && mdns_airplay=true || true
+  avahi-browse -rt _raop._tcp 2>/dev/null | grep -q "_raop._tcp" && mdns_raop=true || true
+fi
+
+alsa_dev=""
+if "$REPO_DIR/bin/alsa-probe" >/dev/null 2>&1; then
+  alsa_dev=$("$REPO_DIR/bin/alsa-probe" 2>/dev/null || true)
+fi
+
+# Determine exit code
+if ! command -v shairport-sync >/dev/null 2>&1 || ! systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+  status=10
+elif [[ "$ap2" != true || "$mdns_airplay" != true ]]; then
+  status=3
 else
-  bootstrap_ok=false
+  status=0
 fi
 
-# Test pkg profile with a no-op if wrapper exists
-if [[ -x /usr/local/sbin/airplay-sd-run ]]; then
-  if /usr/local/sbin/airplay-sd-run pkg-ensure -- /bin/true >/dev/null 2>&1; then
-    pkg_profile_ok=true
-  else
-    pkg_profile_ok=false
-  fi
-fi
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+jq -n \
+  --arg version "$version_str" \
+  --arg alsa "$alsa_dev" \
+  --argjson ap2 "$ap2" \
+  --argjson nqact "$nqptp_active" \
+  --argjson air "$mdns_airplay" \
+  --argjson raop "$mdns_raop" \
+  '{version:{string:$version}, nqptp:{active:$nqact}, mdns:{airplay:$air, raop:$raop}, alsa:{device:$alsa}}' \
+  | tee "$STATE_DIR/last-health.json"
 
-if [[ -f "$STATE_DIR/last-health.json" ]]; then
-  jq --argjson bootstrap "$bootstrap_ok" --argjson pkgprofile "$pkg_profile_ok" \
-     '. + {bootstrap_ok:$bootstrap, pkg_profile_ok:$pkgprofile}' "$STATE_DIR/last-health.json" 2>/dev/null \
-     || cat "$STATE_DIR/last-health.json"
-else
-  printf '{"status":"unknown","reason":"no prior converge","bootstrap_ok":%s,"pkg_profile_ok":%s}\n' \
-    "${bootstrap_ok:-null}" "${pkg_profile_ok:-null}"
-fi
+exit "$status"
