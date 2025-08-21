@@ -56,6 +56,8 @@ sync_systemd_units() {
     ReadWritePaths=/var/log/dpkg \
     ReadWritePaths=/etc/systemd/system
   changed=1
+  # Ensure the next broker invocation uses new sandbox; restart it explicitly
+  enqueue_cmd /usr/bin/systemctl restart converge-broker.service
 
   for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
     [[ -f "$src" ]] || continue

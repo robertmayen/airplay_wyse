@@ -65,8 +65,10 @@ sync_systemd_units() {
     fi
   done
   if [[ $changed -eq 1 ]]; then
+    # Restart broker so transient set-property takes effect immediately
+    enqueue_cmd /usr/bin/systemctl restart converge-broker.service
+    # Daemon-reload will be applied when /etc units are next written successfully
     enqueue_cmd /usr/bin/systemctl daemon-reload
-    # Restart the path unit so it picks up any changes to watcher configs
     enqueue_cmd /usr/bin/systemctl restart converge-broker.path
   fi
 }

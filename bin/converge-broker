@@ -28,6 +28,7 @@ is_allowed() {
         case "${2:-}" in
           airplay-*) return 0 ;;
           converge-broker.path) return 0 ;;
+          converge-broker.service) return 0 ;;
         esac
       fi
       return 1
