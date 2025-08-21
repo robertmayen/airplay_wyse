@@ -398,16 +398,35 @@ resolve_alsa_mixer() {
 }
 
 apply_packages() {
-  set +e
-  "$REPO_DIR/pkg/install.sh"
-  local rc=$?
-  set -e
-  # Treat 0 = no changes, 1 = changes enqueued as success. Any rc >=2 is failure.
-  if [[ $rc -ge 2 ]]; then
-    log "package install/update failed"
-    return 2
-  fi
-  PACKAGES_CHANGED=$rc
+  # APT-only package management - no longer uses pkg/install.sh
+  local changed=0
+  local did_update=0
+  
+  apt_update() {
+    if [[ $did_update -eq 0 ]]; then
+      systemd_run pkg-ensure -- "/usr/bin/apt-get update -y"
+      did_update=1
+    fi
+  }
+  
+  ensure_pkg() {
+    local pkg="$1"
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+      apt_update
+      systemd_run pkg-ensure -- "/usr/bin/apt-get -y install $pkg"
+      changed=1
+    fi
+  }
+  
+  # Core packages required for AirPlay 2
+  ensure_pkg shairport-sync || return 2
+  ensure_pkg nqptp || return 2
+  ensure_pkg avahi-daemon || return 2
+  ensure_pkg avahi-utils || return 2
+  ensure_pkg jq || return 2
+  ensure_pkg alsa-utils || return 2
+  
+  PACKAGES_CHANGED=$changed
   return 0
 }
 
