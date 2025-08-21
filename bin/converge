@@ -228,7 +228,11 @@ apply_configs() {
 }
 
 check_nqptp_health() {
-  # Skeleton: ensure active
+  # If nqptp is not installed (no unit present), treat as optional OK.
+  if ! systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+    return 0
+  fi
+  # Unit exists; ensure it's active
   if ! systemctl is-active --quiet nqptp.service; then
     return 1
   fi

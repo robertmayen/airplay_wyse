@@ -1,7 +1,7 @@
 # Troubleshooting
 
 - Time unsynced: `timedatectl status`; ensure `systemd-timesyncd` active.
-- nqptp not healthy: `systemctl status nqptp`; check UDP 319/320 reachability on LAN.
+- nqptp not healthy: `systemctl status nqptp`; check UDP 319/320 reachability on LAN. On Debian where `nqptp` is not packaged, this unit may be absent; AirPlay will still function without synchronized multi‑room. If desired, build from source: `git clone https://github.com/mikebrady/nqptp && cd nqptp && autoreconf -fi && ./configure --with-systemd-startup && make && sudo make install`.
 - Not visible in AirPlay picker: verify Avahi adverts with `tests/avahi_browse.sh`.
 - ALSA device missing: check `aplay -l`; verify inventory vendor/product/serial.
 - Unintended restarts: check hashes in `/var/lib/airplay_wyse/hashes` and journal for diffs.

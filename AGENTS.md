@@ -113,7 +113,7 @@
   - Guards: hold switch, clock/ntp sanity, inventory presence, tag verification (defense-in-depth).
   - Inventory load: parses `inventory/hosts/$(hostname -s).yml` for `airplay_name`, `alsa.*`, `nic`, optional `target_tag`.
   - Template rendering: substitutes `{{AIRPLAY_NAME}}`, `{{ALSA_DEVICE}}`, `{{AVAHI_IFACE}}` into system configs.
-  - Package gating: calls `pkg/install.sh` via broker to ensure `shairport-sync`, `nqptp`, `avahi-*`, `jq` at minimum versions.
+  - Package gating: calls `pkg/install.sh` via broker to ensure `shairport-sync`, `avahi-*`, `jq` at minimum versions; attempts `nqptp` if available (optional on Debian).
   - Service management: requests safe restarts/enables through broker; never escalates directly.
   - State/health: writes JSON and txt status; returns semantic exit codes for timers/ops.
 
