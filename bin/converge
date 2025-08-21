@@ -723,58 +723,23 @@ ensure_airplay2_support() {
   # Stop shairport via wrapper to avoid device busy during dpkg
   systemd_run svc-restart -- "/usr/bin/systemctl stop airplay-shairport || true"
 
-  # 1) Ensure nqptp installed (prefer local .deb), enabled and active
-  if ! systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
-    # Try local nqptp .deb first
-    shopt -s nullglob
-    local nqdeb=("$REPO_DIR"/pkg/nqptp_*.deb)
-    shopt -u nullglob
-    if [[ ${#nqdeb[@]} -gt 0 ]]; then
-      if ! systemd_run pkg-ensure -- "/usr/bin/dpkg -i /opt/airplay_wyse/pkg/$(basename "${nqdeb[0]}") || /usr/bin/apt-get -y -f install"; then
-        log "nqptp local install failed"
-        return $EXIT_PKG
-      fi
-      changed=1
-    else
-      if command -v apt-get >/dev/null 2>&1; then
-        if ! systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y nqptp"; then
-          log "nqptp apt install failed"
-          return $EXIT_PKG
-        fi
-        changed=1
-      fi
-    fi
+  # 1) Ensure nqptp installed (uses APT-first, source-fallback)
+  if ! ensure_nqptp; then
+    log "Failed to ensure nqptp installation"
+    return $EXIT_PKG
   fi
+  changed=1
+  
   # Enable/start nqptp regardless
   systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service || true"
   systemd_run svc-restart -- "/usr/bin/systemctl restart nqptp.service || /usr/bin/systemctl start nqptp.service || true"
 
-  # 2) Ensure shairport-sync has RAOP2 capability (prefer local AP2/RAOP2 build)
-  if ! has_airplay2_build; then
-    shopt -s nullglob
-    local ss_debs=()
-    # Prefer explicit AP2/RAOP2 builds if provided
-    for f in "$REPO_DIR"/pkg/shairport-sync*ap2*.deb "$REPO_DIR"/pkg/shairport-sync*raop2*.deb; do
-      [[ -f "$f" ]] && ss_debs+=("$f")
-    done
-    shopt -u nullglob
-
-    if [[ ${#ss_debs[@]} -gt 0 ]]; then
-      if ! systemd_run pkg-ensure -- "/usr/bin/dpkg -i ${ss_debs[*]/#/$REPO_DIR\/pkg\/} || /usr/bin/apt-get -y -f install"; then
-        log "shairport-sync local RAOP2 install failed"
-        return $EXIT_PKG
-      fi
-      changed=1
-    else
-      # Fallback to distro package
-      if command -v apt-get >/dev/null 2>&1; then
-        if ! systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true; /usr/bin/apt-get install -y shairport-sync"; then
-          log "shairport-sync apt install failed"
-          return $EXIT_PKG
-        fi
-        changed=1
-      fi
-    fi
+  # 2) Ensure shairport-sync has RAOP2 capability (uses source-fallback)
+  if ! ensure_raop2_shairport_sync; then
+    log "Failed to ensure RAOP2-enabled shairport-sync"
+    # Don't fail completely - continue with existing shairport-sync
+  else
+    changed=1
   fi
 
   # Ensure override to order after nqptp is present
