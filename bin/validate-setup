@@ -13,7 +13,7 @@ error() { log "ERROR: $*"; }
 
 pe_exec() {
   # Secure privilege escalation via wrapper
-  sudo /usr/local/sbin/airplay-sd-run "$@"
+  sudo -S /usr/local/sbin/airplay-sd-run "$@"
 }
 
 check_user_setup() {
