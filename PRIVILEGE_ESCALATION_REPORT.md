@@ -1,114 +1,28 @@
-# Technical Report: Privilege Escalation Implementation in AirPlay Wyse
+# Technical Report: Privilege Model (Archived)
 
-**Date:** January 22, 2025  
-**Repository:** airplay_wyse  
-**Commit:** f62843e29eabebcdb0d4a485fe97dbc4f450e4e5  
+NOTE: The repository now uses the root-run model with hardened systemd units. This document describes an earlier wrapper-based design and is retained for historical context.
 
-## Executive Summary
+## Current Model (Summary)
 
-The AirPlay Wyse repository implements a **single privilege path** security model using a locked-down systemd-run wrapper for privilege escalation. This design eliminates traditional sudo-based privilege escalation in favor of transient systemd units with fine-grained capability restrictions and sandboxing.
+- Services (`reconcile.service`, `converge.service`) run as root with strong systemd hardening (e.g., `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `RestrictSUIDSGID`).
+- Privileged actions such as package installation and config deployment happen directly within these sandboxed services.
+- No sudoers entries or wrapper binaries are required.
 
-## Architecture Overview
+## Legacy Wrapper Model (Historical)
 
-### Core Components
+The prior design implemented a single privilege-escalation path via an allowlisted systemd-run wrapper and a minimal sudoers entry. It reduced the sudo attack surface but introduced additional moving parts (wrapper binary, sudoers, transient unit management). This path has been superseded by the simpler, hardened root-run approach.
 
-1. **Unprivileged Service Layer**
-   - `reconcile.service` - Runs as `airplay` user, orchestrates GitOps updates
-   - `converge.service` - Runs as `airplay` user, performs system convergence
-   - Both services use systemd sandboxing (`NoNewPrivileges=yes`, `ProtectSystem=strict`)
+## Security Controls (Current)
 
-2. **Single Privilege Escalation Path**
-   - `scripts/airplay-sd-run` - Locked-down wrapper for systemd-run
-   - Replaces traditional sudo-based privilege escalation
-   - Creates transient systemd units with capability-based restrictions
+- Hardened systemd services with restrictive filesystem access and sandboxing.
+- Minimal `ReadWritePaths` to required locations (state, runtime, and config paths).
+- No persistent privileged daemons beyond systemd services themselves.
 
-3. **Sudoers Configuration**
-   - Minimal NOPASSWD sudo access for `airplay` user
-   - Only allows execution of `/usr/local/sbin/airplay-sd-run` (no direct `systemd-run`)
+## Rationale for Change
 
-## Privilege Escalation Mechanism
-
-### 1. Wrapper-Based Privilege Escalation
-
-The system uses `scripts/airplay-sd-run` as the sole privilege escalation mechanism. The wrapper takes an absolute path to an allowlisted executable and arguments, infers a security profile, and executes it via `systemd-run` with sandboxing.
-
-```bash
-# Example usage from converge (executed via sudo internally):
-/usr/local/sbin/airplay-sd-run /usr/bin/install -m 0644 src dest
-/usr/local/sbin/airplay-sd-run /usr/bin/systemctl daemon-reload
-/usr/local/sbin/airplay-sd-run /usr/bin/apt-get -y install shairport-sync
-```
-
-**Key Security Features:**
-- **Allowlisting**: Only specific executables are permitted
-- **Profile inference**: Security profile selected by command type (pkg/file/systemd)
-- **Transient units**: No persistent privileged processes
-- **Capability bounding**: `CapabilityBoundingSet=` (empty)
-- **Comprehensive sandboxing**: Multiple systemd security directives
-
-### 2. Sudoers Configuration
-
-Located in `/etc/sudoers.d/airplay-wyse`:
-```
-Defaults:airplay !requiretty
-airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run
-```
-
-**Security Analysis:**
-- ✅ **Minimal scope** - Only the wrapper binary allowed
-- ✅ **No shell access** - Cannot execute arbitrary commands via sudo
-- ✅ **User-specific** - Only applies to `airplay` user
-- ✅ **No TTY requirement** - Supports automated execution
-
-### 3. Privilege Profiles
-
-Profiles are inferred automatically by the wrapper based on the executable path:
-- `pkg`: `/usr/bin/apt-get`, `/usr/bin/dpkg`
-- `systemd`: `/usr/bin/systemctl`
-- `file`: `/usr/bin/install`, `/bin/rm`, `/bin/mkdir`
-
-## Security Controls
-
-### 1. Systemd Sandboxing
-
-Each transient unit created by the wrapper includes comprehensive sandboxing:
-
-```ini
-NoNewPrivileges=yes
-ProtectHome=read-only
-ProtectSystem=strict
-PrivateTmp=yes
-CapabilityBoundingSet=
-DevicePolicy=closed
-LockPersonality=yes
-MemoryDenyWriteExecute=yes
-```
-
-### 2. Capability Restrictions
-
-- **Empty capability bounding set** - No special capabilities granted
-- **Profile-specific write paths** - Minimal filesystem access per operation type
-- **Network isolation** - Private network namespace where applicable
-
-### 3. Audit Trail
-
-The wrapper provides comprehensive logging:
-- **Execution logging** - All operations logged via systemd-cat
-- **Result tracking** - Success/failure status with exit codes
-- **Performance metrics** - Execution duration tracking
-- **Log persistence** - Operations logged to `/var/lib/airplay_wyse/pkg/`
-
-## Implementation Analysis
-
-### Privilege Escalation Flow
-
-1. **Unprivileged service** (`converge` or `reconcile`) needs privileged operation
-2. **Calls wrapper function** `systemd_run <profile> -- <command>`
-3. **Wrapper validates profile** and constructs systemd-run arguments
-4. **Sudo executes** `/usr/local/sbin/airplay-sd-run` with profile and command
-5. **Wrapper creates** transient systemd unit with appropriate restrictions
-6. **systemd-run executes** command in sandboxed environment
-7. **Results logged** and returned to calling process
+- Simplifies operations and reduces failure points (no sudoers or wrapper maintenance).
+- Leverages first-class systemd hardening in a single execution context.
+- Retains strong isolation with fewer moving parts.
 
 ### Code Example
 

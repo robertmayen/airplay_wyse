@@ -34,7 +34,6 @@ ensure_dirs() {
   if [[ ! -d "$TMPDIR" ]]; then
     install -d -m 0755 /run/airplay
     install -d -m 0755 "$TMPDIR"
-    chown -R airplay:airplay /run/airplay
   fi
   
   # Ensure temp directory is writable
@@ -263,25 +262,36 @@ nqptp_installed() {
 
 ensure_ap2_packages() {
   local changed=0
-  
-  # Check if we need to install from source
+
+  # Determine if we need packages
   local needs_install=0
-  
-  # Check if shairport-sync exists and has AirPlay 2 support
   if ! command -v shairport-sync >/dev/null 2>&1; then
     needs_install=1
   elif ! shairport-sync -V 2>&1 | grep -q "AirPlay2"; then
     needs_install=1
   fi
-  
-  # Check if nqptp service exists
   if ! systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
     needs_install=1
   fi
-  
+
   if [[ $needs_install -eq 1 ]]; then
-    log "Installing AirPlay 2 support from source..."
-    if ! "$REPO_DIR/bin/install-airplay2"; then
+    log "Ensuring AirPlay 2 packages via APT (shairport-sync, nqptp)..."
+    local did_update=0
+    apt_update() {
+      if [[ $did_update -eq 0 ]]; then
+        apt-get update -y || return 1
+        did_update=1
+      fi
+    }
+    ensure_pkg() {
+      local pkg="$1"
+      if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        apt_update || return 1
+        DEBIAN_FRONTEND=noninteractive apt-get -y install "$pkg" || return 1
+      fi
+    }
+    if ! ensure_pkg shairport-sync || ! ensure_pkg nqptp; then
+      log "APT install failed for required packages"
       return 100
     fi
     changed=1

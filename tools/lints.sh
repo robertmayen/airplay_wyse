@@ -40,46 +40,23 @@ cd "$REPO_ROOT"
 log "Running foundation lints..."
 
 # 1. Single Privilege Path Enforcement
-log "Checking privilege escalation model..."
+log "Checking privilege model (root-run)..."
 
-# No direct sudo systemd-run bypasses in bin/
-if grep -r "sudo systemd-run" bin/ --exclude-dir=.git 2>/dev/null; then
-    fail "Direct sudo systemd-run bypass found in bin/"
+# Reconcile service should run as root
+check "reconcile.service runs as root" "grep -q '^User=root' systemd/reconcile.service"
+
+# No wrapper file present
+if [ -f scripts/airplay-sd-run ]; then
+    fail "Legacy wrapper present (scripts/airplay-sd-run)"
 else
-    pass "No direct sudo bypasses in bin/"
-fi
-
-# Wrapper exists
-check "Privilege wrapper exists" "[ -f scripts/airplay-sd-run ]"
-
-# Wrapper is executable
-check "Privilege wrapper is executable" "[ -x scripts/airplay-sd-run ]"
-
-# pe_exec in converge uses the wrapper path
-if grep -q "sudo /usr/local/sbin/airplay-sd-run" bin/converge; then
-    pass "pe_exec uses wrapper path in converge"
-else
-    fail "pe_exec does not use wrapper path"
+    pass "No legacy wrapper present"
 fi
 
 # 2. No On-Device Builds
-log "Checking immutable host policy..."
+log "Checking install policy (APT-only)..."
 
-# No build tools in package lists
-for tool in build-essential gcc g++ make cmake; do
-    if grep -r "$tool" . --exclude-dir=.git --exclude-dir=node_modules 2>/dev/null | grep -v "# No $tool" | grep -q "$tool"; then
-        fail "Build tool '$tool' referenced in repository"
-    else
-        pass "No '$tool' references found"
-    fi
-done
-
-# No pkg/build-* scripts
-if find . -name "build-*" -path "*/pkg/*" 2>/dev/null | grep -q .; then
-    fail "Build scripts found in pkg/"
-else
-    pass "No build scripts in pkg/"
-fi
+# No source installer should exist
+check "No source install script present" "[ ! -f bin/install-airplay2 ]"
 
 # 3. AirPlay 2 Enforcement
 log "Checking AirPlay 2 requirements..."

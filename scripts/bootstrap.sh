@@ -3,7 +3,6 @@ set -euo pipefail
 
 # AirPlay Wyse one-shot bootstrap
 # - Creates 'airplay' user and sets permissions
-# - Installs privilege wrapper and sudoers rule
 # - Clones repo and installs systemd units
 # - Enables reconcile.timer and optionally triggers first run
 #
@@ -32,32 +31,25 @@ ensure_pkg() {
 }
 
 setup_user() {
+  # Optional: create 'airplay' user for audio group membership, though services run as root.
   if ! id -u airplay >/dev/null 2>&1; then
     log "creating user 'airplay'"
     useradd -r -m -s /usr/sbin/nologin airplay
   fi
   getent group audio >/dev/null 2>&1 || groupadd audio || true
   usermod -aG audio airplay || true
-  
-  # Remove airplay from sudo group if present (security best practice)
-  if groups airplay | grep -q '\bsudo\b'; then
-    log "removing airplay from sudo group for security"
-    deluser airplay sudo || true
-  fi
 }
 
 setup_ssh() {
   local key_path="${BOOTSTRAP_DEPLOY_KEY_PATH:-}"
   local known_path="${BOOTSTRAP_KNOWN_HOSTS_PATH:-}"
   [[ -z "$key_path" && -z "$known_path" ]] && return 0
-  su -s /bin/bash - airplay -c 'mkdir -p ~/.ssh && chmod 700 ~/.ssh'
+  mkdir -p /root/.ssh && chmod 700 /root/.ssh
   if [[ -n "${key_path:-}" && -f "$key_path" ]]; then
-    install -m 0600 "$key_path" ~airplay/.ssh/id_ed25519
-    chown airplay:airplay ~airplay/.ssh/id_ed25519
+    install -m 0600 "$key_path" /root/.ssh/id_ed25519
   fi
   if [[ -n "${known_path:-}" && -f "$known_path" ]]; then
-    install -m 0644 "$known_path" ~airplay/.ssh/known_hosts
-    chown airplay:airplay ~airplay/.ssh/known_hosts
+    install -m 0644 "$known_path" /root/.ssh/known_hosts
   fi
 }
 
@@ -68,38 +60,12 @@ clone_repo() {
     return 0
   fi
   install -d -m 0755 "$repo_dir"
-  chown airplay:airplay "$repo_dir"
   log "cloning $repo_url to $repo_dir"
-  su -s /bin/bash - airplay -c "git clone '$repo_url' '$repo_dir'"
+  git clone "$repo_url" "$repo_dir"
 }
 
-install_wrapper() {
-  local repo_dir="$1"
-  local src="$repo_dir/scripts/airplay-sd-run"
-  [[ -f "$src" ]] || die "wrapper not found at $src"
-  install -m 0755 "$src" /usr/local/sbin/airplay-sd-run
-  chown root:root /usr/local/sbin/airplay-sd-run
-}
-
-configure_sudoers() {
-  local sfile=/etc/sudoers.d/airplay-wyse
-  log "configuring sudoers for airplay user"
-  
-  # Create sudoers file with proper permissions
-  {
-    echo 'Defaults:airplay !requiretty'
-    echo 'airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run'
-  } > "$sfile"
-  chmod 440 "$sfile"
-  
-  # Validate sudoers configuration
-  if ! visudo -c >/dev/null 2>&1; then
-    rm -f "$sfile"
-    die "sudoers validation failed"
-  fi
-  
-  log "sudoers configuration validated successfully"
-}
+install_wrapper() { :; }
+configure_sudoers() { :; }
 
 install_units() {
   local repo_dir="$1"
@@ -128,7 +94,7 @@ write_inventory() {
       echo "target_tag: $BOOTSTRAP_TARGET_TAG"
     fi
   } > "$inv"
-  chown -R airplay:airplay "$repo_dir/inventory"
+  # Inventory is read by root-run services
 }
 
 setup_runtime_dirs() {
@@ -138,11 +104,11 @@ setup_runtime_dirs() {
   # Create runtime directories that converge expects
   install -d -m 0755 /run/airplay
   install -d -m 0755 /run/airplay/tmp
-  chown -R airplay:airplay /run/airplay
+  # Root-run services will use these paths directly
   
   # Create state directory
   install -d -m 0755 /var/lib/airplay_wyse
-  chown airplay:airplay /var/lib/airplay_wyse
+  # Owned by root for root-run services
 }
 
 enable_services() {
@@ -166,8 +132,6 @@ main() {
   setup_user
   setup_ssh
   clone_repo "$REPO_URL" "$REPO_DIR"
-  install_wrapper "$REPO_DIR"
-  configure_sudoers
   setup_runtime_dirs "$REPO_DIR"
   install_units "$REPO_DIR"
   if [[ -n "${BOOTSTRAP_AIRPLAY_NAME:-}" || -n "${BOOTSTRAP_NIC:-}" || -n "${BOOTSTRAP_TARGET_TAG:-}" ]]; then
@@ -176,7 +140,7 @@ main() {
   enable_services
 
   log "bootstrap complete"
-  log "health: sudo -u airplay $REPO_DIR/bin/health"
+  log "health: $REPO_DIR/bin/health"
   log "logs: journalctl -u reconcile -n 50 --no-pager"
 }
 

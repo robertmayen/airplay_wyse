@@ -6,10 +6,7 @@ REPO_DIR="/opt/airplay_wyse"
 log() { printf '%s [reconcile] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 main() {
-  if [[ "$(id -un)" != "airplay" ]]; then
-    echo "This service must run as user 'airplay'" >&2
-    exit 1
-  fi
+  # Root-run model: service runs as root with systemd hardening
   cd "$REPO_DIR"
   log "Starting reconcile"
   # Update to target tag (bin/update verifies and checks out)

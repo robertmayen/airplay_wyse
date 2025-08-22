@@ -49,11 +49,7 @@ short_host() { hostname -s 2>/dev/null || hostname; }
 main() {
   local rc=1 target_tag=""
 
-  if [[ "$(id -un)" != "airplay" ]]; then
-    echo "This script must run as user 'airplay'" >&2
-    write_last_update "" 1
-    exit 1
-  fi
+  # Root-run model: invoked by reconcile.service as root
 
   cd "$REPO_DIR"
   log "Updater starting in $PWD"

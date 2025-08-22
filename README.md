@@ -6,10 +6,9 @@ Minimal AirPlay 2 receiver for Wyse 5070 with USB DAC.
 
 This repository provides a GitOps-managed AirPlay 2 receiver implementation for Wyse 5070 thin clients with USB DACs. The system uses:
 
-- **Shairport Sync** with AirPlay 2 support (built from source)
-- **NQPTP** for time synchronization (built from source)
-- **Source-based installation** for latest AirPlay 2 features
-- **Single privilege path** via systemd-run wrapper
+- **Shairport Sync** with AirPlay 2 support (via APT on Debian 13)
+- **NQPTP** for time synchronization (via APT)
+- **Root-run services with systemd hardening** (no sudo/wrapper needed)
 - **Idempotent convergence** with health monitoring
 
 ## Quick Start
@@ -40,23 +39,17 @@ airplay_wyse/
 └── docs/           # Operations documentation
 ```
 
-## Validation and Auto-Remediation
+## How It Works
 
-The `bin/validate-setup` script provides comprehensive validation and automatic fixing of common deployment issues:
-
-- **User setup validation** - Ensures airplay user exists with correct group memberships
-- **Sudoers configuration** - Validates and fixes NOPASSWD rules for privilege escalation
-- **Runtime directories** - Creates and fixes permissions for required directories
-- **Build dependencies** - Automatically installs missing packages for AirPlay 2 compilation
-- **Systemd units** - Verifies service installation and enablement
-
-This addresses "user messed up situations" with repository-based fixes instead of manual shell commands.
+- `reconcile.timer` triggers `reconcile.service` as root.
+- `bin/reconcile` runs `bin/update` (fetch/select/checkout tag) then `bin/converge` (ensure packages, render configs, restart services, record health).
+- Privileged actions are executed directly by the root-run service with strong systemd sandboxing.
 
 ## AirPlay 2 Features
 
 - **Full AirPlay 2 support** with multi-room audio capabilities
-- **Source-based installation** ensures latest features and compatibility
-- **Automatic dependency management** for build requirements
+- **APT-based installation** for shairport-sync (with RAOP2) and nqptp
+- **Automatic dependency management** via APT
 - **NQPTP integration** for precise timing synchronization
 - **Comprehensive testing** with validation scripts
 

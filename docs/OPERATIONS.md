@@ -1,26 +1,14 @@
-# Operations (Minimal)
+# Operations (Root-Run Model)
 
-This document describes the minimal operational workflow for turning a Wyse 5070 + USB DAC into an AirPlay 2 receiver with GitOps.
+This document describes the operational workflow for running a Wyse 5070 + USB DAC as an AirPlay 2 receiver with GitOps. Services run as root with strong systemd hardening; no sudoers or wrapper scripts are required.
 
 ## Overview
-- Devices run `reconcile.timer` → `reconcile.service` as the `airplay` user.
-- `reconcile` executes `update` (fetch/select/checkout tag) then `converge` (install packages, render configs, restart services, record health).
-- Privileged actions are executed only through `/usr/local/sbin/airplay-sd-run`.
+- Devices run `reconcile.timer` → `reconcile.service` as the root user.
+- `reconcile` executes `update` (fetch/select/checkout tag) then `converge` (ensure APT packages, render configs, restart services, record health).
 
 ## Prerequisites (Device)
 - Debian 13 preferred (APT provides `shairport-sync` with AirPlay 2 and `nqptp`).
-- User `airplay` exists and can run the wrapper with NOPASSWD sudo.
-- Wrapper installed:
-  - Copy `scripts/airplay-sd-run` to `/usr/local/sbin/airplay-sd-run` (root-owned, 0755).
-  - **CRITICAL**: Verify wrapper integrity after installation.
-- **Sudoers configuration (SINGLE PRIVILEGE PATH)**:
-  ```
-  # /etc/sudoers.d/airplay-wyse
-  Defaults:airplay !requiretty
-  airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run
-  ```
-  **Note**: Only the wrapper is allowed. Direct `systemd-run` access has been removed for security.
-- Repository cloned to `/opt/airplay_wyse` (owned by `airplay` user).
+- Repository cloned to `/opt/airplay_wyse`.
 - Systemd units installed:
   - Copy `systemd/reconcile.*`, `systemd/converge.service` to `/etc/systemd/system/`.
   - Copy overrides: `systemd/overrides/*/` to `/etc/systemd/system/`.
@@ -60,24 +48,8 @@ alsa:
 - Verify advertisement: `avahi-browse -rt _airplay._tcp`.
 
 ## Notes
-- No compilers/build toolchains are required on the host. Converge installs packages via APT; if a local `.deb` is present in the repo checkout, it may be installed by `converge` via `dpkg -i`.
-- Avahi drop-in template is provided and applied only if different from the current content.
-
-## Security Update
-
-The wrapper has been updated to fix a critical shell injection vulnerability. Key changes:
-- **No shell invocation**: Commands are executed directly via systemd-run
-- **Input validation**: Executable paths must be absolute and exist
-- **Allowlisting**: Each profile only allows specific executables
-- **Sandboxing**: Comprehensive systemd security properties applied
-
-### Installation
-```bash
-sudo cp scripts/airplay-sd-run /usr/local/sbin/airplay-sd-run
-sudo chown root:root /usr/local/sbin/airplay-sd-run
-sudo chmod 755 /usr/local/sbin/airplay-sd-run
-sudo visudo -c  # Verify sudoers syntax
-```
+- Converge installs packages via APT (no on-device compilation).
+- Avahi drop-in template is applied only if different from the current content.
 
 ## Acceptance Checklist
 - `shairport-sync -V` contains `AirPlay2`.
@@ -87,6 +59,7 @@ sudo visudo -c  # Verify sudoers syntax
 - A second `bin/converge` run returns unchanged (idempotent).
 - **Security**: Wrapper owned by root:root with 755 permissions.
 - **Security**: Only wrapper allowed in sudoers (no direct systemd-run access).
+  (Not applicable in root-run model; services execute directly under systemd hardening.)
 
 ## Converge Exit Codes
 - 0: healthy (no changes)
