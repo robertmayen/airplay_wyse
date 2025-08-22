@@ -1,9 +1,9 @@
 # Operations (Root-Run Model)
 
-This document describes the operational workflow for running a Wyse 5070 + USB DAC as an AirPlay 2 receiver with GitOps. Services run as root with strong systemd hardening; no sudoers or wrapper scripts are required.
+This document describes the operational workflow for running a Wyse 5070 + USB DAC as an AirPlay 2 receiver with GitOps. Services run as root with strong systemd hardening (ProtectSystem=strict with narrowly scoped ReadWritePaths); no sudoers or wrapper scripts are required.
 
 ## Overview
-- Devices run `reconcile.timer` → `reconcile.service` as the root user.
+- Devices run `reconcile.timer` → `reconcile.service` as the root user under a hardened sandbox.
 - `reconcile` executes `update` (fetch/select/checkout tag) then `converge` (ensure APT packages, render configs, restart services, record health).
 
 ## Prerequisites (Device)
@@ -48,7 +48,10 @@ alsa:
 - Verify advertisement: `avahi-browse -rt _airplay._tcp`.
 
 ## Notes
-- Converge installs packages via APT (no on-device compilation).
+- Converge installs packages via APT (no on-device compilation). Units enforce `ProtectSystem=strict` and allow writes only to:
+  - `/opt/airplay_wyse`, `/var/lib/airplay_wyse`, `/run`, `/run/airplay`
+  - `/etc` (for config deployment)
+  - `/usr` and APT/DPKG state: `/var/lib/apt`, `/var/cache/apt`, `/var/lib/dpkg`, `/var/log`
 - Avahi drop-in template is applied only if different from the current content.
 
 ## Acceptance Checklist
@@ -57,9 +60,7 @@ alsa:
 - `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp`.
 - `bin/alsa-probe` returns an ALSA device string and `aplay -D <device>` can open it (busy tolerated).
 - A second `bin/converge` run returns unchanged (idempotent).
-- **Security**: Wrapper owned by root:root with 755 permissions.
-- **Security**: Only wrapper allowed in sudoers (no direct systemd-run access).
-  (Not applicable in root-run model; services execute directly under systemd hardening.)
+- **Security**: Root-run model with systemd sandboxing; no sudoers or wrapper required.
 
 ## Converge Exit Codes
 - 0: healthy (no changes)

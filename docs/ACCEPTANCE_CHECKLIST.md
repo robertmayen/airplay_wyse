@@ -4,7 +4,7 @@
 
 ## Quick Validation
 
-Use the enhanced lints script for comprehensive validation:
+Use the lints script for comprehensive validation:
 
 ```bash
 # Repository structure validation (CI/development)
@@ -14,19 +14,15 @@ Use the enhanced lints script for comprehensive validation:
 AIRPLAY_RUNTIME_CHECKS=1 ./tools/lints.sh
 ```
 
-## Manual Deployment Steps
+## Manual Deployment Steps (Root-Run Model)
 
-### 1. Pre-Deployment Setup
+### 1. Install Units and Enable Timer (as root)
 ```bash
-# Install wrapper with correct permissions
-sudo cp scripts/airplay-sd-run /usr/local/sbin/airplay-sd-run
-sudo chown root:root /usr/local/sbin/airplay-sd-run
-sudo chmod 755 /usr/local/sbin/airplay-sd-run
-
-# Configure sudoers
-echo 'Defaults:airplay !requiretty' | sudo tee /etc/sudoers.d/airplay-wyse
-echo 'airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run' | sudo tee -a /etc/sudoers.d/airplay-wyse
-sudo visudo -c
+install -m 0644 systemd/reconcile.service /etc/systemd/system/reconcile.service
+install -m 0644 systemd/reconcile.timer /etc/systemd/system/reconcile.timer
+install -m 0644 systemd/converge.service /etc/systemd/system/converge.service
+systemctl daemon-reload
+systemctl enable --now reconcile.timer
 ```
 
 ### 2. Essential Validation
@@ -68,7 +64,7 @@ speaker-test -D "$DEVICE" -c 2 -t wav -l 1
 
 **Common Issues:**
 - **No AirPlay advertisement**: Check `systemctl status avahi-daemon nqptp shairport-sync`
-- **Permission denied**: Verify wrapper permissions and sudoers configuration
+- **APT install failures**: Ensure `reconcile.service` allows writes to `/usr` (ReadWritePaths)
 - **No audio output**: Run `./bin/alsa-probe` and check USB DAC connection
 - **Converge failures**: Check `journalctl -u reconcile -n 50`
 

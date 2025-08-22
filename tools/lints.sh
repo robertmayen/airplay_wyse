@@ -105,6 +105,14 @@ check "MemoryDenyWriteExecute in override" "grep -q 'MemoryDenyWriteExecute=yes'
 # Address family restrictions
 check "RestrictAddressFamilies in override" "grep -q 'RestrictAddressFamilies=' systemd/overrides/shairport-sync.service.d/override.conf"
 
+# Converge/Reconcilers should enforce ProtectSystem=strict and hardened AFs
+check "converge.service uses ProtectSystem=strict" "grep -q '^ProtectSystem=strict' systemd/converge.service"
+check "reconcile.service uses ProtectSystem=strict" "grep -q '^ProtectSystem=strict' systemd/reconcile.service"
+check "converge.service restricts AFs" "grep -q '^RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' systemd/converge.service"
+check "reconcile.service restricts AFs" "grep -q '^RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' systemd/reconcile.service"
+check "converge.service sets NoNewPrivileges" "grep -q '^NoNewPrivileges=yes' systemd/converge.service"
+check "reconcile.service sets NoNewPrivileges" "grep -q '^NoNewPrivileges=yes' systemd/reconcile.service"
+
 # 7. GitOps Requirements
 log "Checking GitOps compliance..."
 
@@ -156,9 +164,6 @@ log "Checking documentation..."
 
 # Operations doc exists
 check "Operations documentation exists" "[ -f docs/OPERATIONS.md ]"
-
-# Foundation assessment exists
-check "Foundation assessment exists" "[ -f docs/FOUNDATION_ASSESSMENT.md ]"
 
 # Acceptance checklist exists
 check "Acceptance checklist exists" "[ -f docs/ACCEPTANCE_CHECKLIST.md ]"

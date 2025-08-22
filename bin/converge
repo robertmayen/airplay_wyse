@@ -48,12 +48,16 @@ ensure_dirs() {
 # GitOps: ensure systemd units on device match repo.
 sync_systemd_units() {
   local changed=0
-  # Ensure systemd units on device match repo; write directly via transient unit
+  # Ensure systemd units on device match repo; avoid shadowing vendor units
 
   for src in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.path; do
     [[ -f "$src" ]] || continue
     local base dest
     base=$(basename "$src")
+    # Do not override vendor-provided nqptp unit (APT installs one under /lib/systemd)
+    if [[ "$base" == "nqptp.service" ]]; then
+      continue
+    fi
     dest="/etc/systemd/system/$base"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
       install -m 0644 "$src" "$dest"
@@ -459,11 +463,7 @@ check_avahi_raop() {
 converge_main() {
   ensure_dirs
 
-  # Phase 1: Direct systemd-run privilege escalation (no wrapper needed)
-  if ! command -v systemd-run >/dev/null 2>&1; then
-    emit_health "bootstrap_required" "$EXIT_INV" "missing systemd-run" >/dev/null || true
-    exit "$EXIT_INV"
-  fi
+  # Root-run model: no systemd-run dependency
 
   held_check
   if ! load_inventory; then

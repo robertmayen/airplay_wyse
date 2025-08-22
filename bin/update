@@ -27,7 +27,13 @@ sync_systemd_units() { :; }
 
 yaml_get_target_tag() {
   local file=$1
-  awk -F: '/^target_tag\s*:/ {val=$2; sub(/^[[:space:]]+/,"",val); sub(/[[:space:]]+$/,"",val); gsub(/^"|"$/,"",val); gsub(/^\'"'"'|\'"'"'$/,"",val); print val; exit}' "$file" 2>/dev/null || true
+  # Extract value, trimming whitespace and wrapping quotes (single or double)
+  # Example: target_tag: "v1.2.3" -> v1.2.3
+  if [[ -f "$file" ]]; then
+    grep -E '^[[:space:]]*target_tag[[:space:]]*:' "$file" | \
+      sed -E 's/^[[:space:]]*target_tag[[:space:]]*:[[:space:]]*//; s/^["'"'']|["'"'']$//g' | \
+      head -n1
+  fi
 }
 
 highest_semver_tag() {
@@ -114,13 +120,11 @@ main() {
   for f in \
     "$REPO_DIR/bin/converge" \
     "$REPO_DIR/bin/reconcile" \
-    "$REPO_DIR/bin/preflight" \
     "$REPO_DIR/bin/update" \
-    "$REPO_DIR/bin/bootstrap" \
     "$REPO_DIR/bin/diag" \
     "$REPO_DIR/bin/health" \
-    "$REPO_DIR/bin/rollback" \
-    "$REPO_DIR/pkg/install.sh"; do
+    "$REPO_DIR/bin/alsa-probe" \
+    "$REPO_DIR/bin/test-airplay2"; do
     [[ -f "$f" ]] && chmod +x "$f" 2>/dev/null || true
   done
 

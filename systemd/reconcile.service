@@ -12,6 +12,7 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/airplay_wyse/bin/reconcile
 # Systemd sandboxing for security
 NoNewPrivileges=yes
+ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
@@ -24,7 +25,8 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @obsolete @debug @mount
-ReadWritePaths=/var/lib/airplay_wyse /opt/airplay_wyse /etc /run /var
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/airplay_wyse /opt/airplay_wyse /etc /run /usr /var/lib/apt /var/cache/apt /var/lib/dpkg /var/log
 
 [Install]
 WantedBy=multi-user.target
