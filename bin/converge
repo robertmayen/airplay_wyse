@@ -21,11 +21,7 @@ EXIT_SYSTEMD=11
 log() { echo "$(date --iso-8601=seconds) [converge] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-pe_exec() {
-  # Secure privilege escalation via wrapper (single privilege path)
-  # Usage: pe_exec <command> [args...]
-  sudo /usr/local/sbin/airplay-sd-run "$@"
-}
+# No privilege escalation needed - running as root via systemd
 
 # Bootstrap logic removed: wrapper/sudoers must be preinstalled.
 
@@ -33,9 +29,21 @@ ensure_dirs() {
   # State dir may be created by provisioning; create lazily if writable.
   mkdir -p "$STATE_DIR" 2>/dev/null || true
   mkdir -p "$STATE_DIR/hashes" 2>/dev/null || true
+  
   # Create temp directory in writable location (Wyse has read-only /tmp and /var/tmp)
-  mkdir -p "$TMPDIR" 2>/dev/null || true
-  : # no queue; transient privileged actions via systemd-run
+  if [[ ! -d "$TMPDIR" ]]; then
+    install -d -m 0755 /run/airplay
+    install -d -m 0755 "$TMPDIR"
+    chown -R airplay:airplay /run/airplay
+  fi
+  
+  # Ensure temp directory is writable
+  if [[ ! -w "$TMPDIR" ]]; then
+    log "WARN: temp directory $TMPDIR not writable, using fallback"
+    TMPDIR="/tmp/airplay-$$"
+    mkdir -p "$TMPDIR" 2>/dev/null || TMPDIR="/dev/shm/airplay-$$"
+    mkdir -p "$TMPDIR" 2>/dev/null || TMPDIR="."
+  fi
 }
 
 # GitOps: ensure systemd units on device match repo.
@@ -49,19 +57,19 @@ sync_systemd_units() {
     base=$(basename "$src")
     dest="/etc/systemd/system/$base"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      pe_exec /usr/bin/install -m 0644 "$src" "$dest"
+      install -m 0644 "$src" "$dest"
       changed=1
     fi
   done
   # Ensure converge drop-in override mirrors SuccessExitStatus
   local conv_ov_src="$REPO_DIR/systemd/overrides/converge.service.d/override.conf"
   if [[ -f "$conv_ov_src" ]]; then
-    pe_exec /usr/bin/install -d -m 0755 /etc/systemd/system/converge.service.d
-    pe_exec /usr/bin/install -m 0644 "$conv_ov_src" /etc/systemd/system/converge.service.d/override.conf
+    install -d -m 0755 /etc/systemd/system/converge.service.d
+    install -m 0644 "$conv_ov_src" /etc/systemd/system/converge.service.d/override.conf
     changed=1
   fi
   if [[ $changed -eq 1 ]]; then
-    pe_exec /usr/bin/systemctl daemon-reload
+    systemctl daemon-reload
     # Log SuccessExitStatus configured for converge.service for verification
     local ses
     ses=$(systemctl show -p SuccessExitStatus --value converge.service 2>/dev/null || echo)
@@ -77,14 +85,14 @@ sync_systemd_units() {
   for u in "${obsolete[@]}"; do
     if [[ -f "$u" ]]; then
       local uname; uname=$(basename "$u")
-      pe_exec /usr/bin/systemctl stop "$uname" || true
-      pe_exec /usr/bin/systemctl disable "$uname" || true
-      pe_exec /bin/rm -f "$u"
+      systemctl stop "$uname" || true
+      systemctl disable "$uname" || true
+      rm -f "$u"
       removed=1
     fi
   done
   if [[ $removed -eq 1 ]]; then
-    pe_exec /usr/bin/systemctl daemon-reload
+    systemctl daemon-reload
   fi
 }
 
@@ -205,18 +213,18 @@ sync_shairport_override() {
   local changed=0
   if [[ -f "$src" ]]; then
     if [[ ! -d "/etc/systemd/system/shairport-sync.service.d" ]]; then
-      pe_exec /usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
+      install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
       changed=1
     fi
     local dest="/etc/systemd/system/shairport-sync.service.d/override.conf"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      pe_exec /usr/bin/install -m 0644 "$src" "$dest"
+      install -m 0644 "$src" "$dest"
       changed=1
     fi
   fi
   if [[ $changed -eq 1 ]]; then
-    pe_exec /usr/bin/systemctl daemon-reload
-    pe_exec /usr/bin/systemctl restart shairport-sync.service
+    systemctl daemon-reload
+    systemctl restart shairport-sync.service
   fi
   return $changed
 }
@@ -225,10 +233,10 @@ ensure_nqptp_started() {
   # If nqptp service exists, ensure it's enabled and started via transient privileged unit
   if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
     if ! systemctl is-enabled --quiet nqptp.service 2>/dev/null; then
-      pe_exec /usr/bin/systemctl enable nqptp.service
+      systemctl enable nqptp.service
     fi
     if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
-      pe_exec /usr/bin/systemctl start nqptp.service
+      systemctl start nqptp.service
     fi
   fi
 }
@@ -288,20 +296,20 @@ remediate_raop2() {
   local changed=0
   local ovsrc="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
   if [[ -f "$ovsrc" ]]; then
-    pe_exec /usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
-    pe_exec /usr/bin/install -m 0644 "$ovsrc" /etc/systemd/system/shairport-sync.service.d/override.conf
+    install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
+    install -m 0644 "$ovsrc" /etc/systemd/system/shairport-sync.service.d/override.conf
     changed=1
   fi
-  pe_exec /usr/bin/systemctl daemon-reload
+  systemctl daemon-reload
   if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
-    pe_exec /usr/bin/systemctl enable nqptp.service || true
-    pe_exec /usr/bin/systemctl start nqptp.service || true
+    systemctl enable nqptp.service || true
+    systemctl start nqptp.service || true
     changed=1
   else
-    pe_exec /usr/bin/systemctl restart nqptp.service || true
+    systemctl restart nqptp.service || true
     changed=1
   fi
-  pe_exec /usr/bin/systemctl restart shairport-sync.service || true
+  systemctl restart shairport-sync.service || true
   echo $changed
 }
 
@@ -364,9 +372,9 @@ apply_configs() {
     sed -i "/mixer_control_name/d" "$tmp_ss"
   fi
   if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
-    pe_exec /usr/bin/install -m 0644 "$tmp_ss" /etc/shairport-sync.conf
+    install -m 0644 "$tmp_ss" /etc/shairport-sync.conf
     changed=1
-    pe_exec /usr/bin/systemctl restart shairport-sync.service || true
+    systemctl restart shairport-sync.service || true
   fi
   rm -f "$tmp_ss"
 
@@ -376,13 +384,13 @@ apply_configs() {
     local tmp_av; tmp_av=$(mktemp -p "$TMPDIR")
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
     if [[ ! -d "/etc/avahi/avahi-daemon.conf.d" ]]; then
-      pe_exec /usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
+      install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
       changed=1
     fi
     if [[ ! -f "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" ]] || ! cmp -s "$tmp_av" "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"; then
-      pe_exec /usr/bin/install -m 0644 "$tmp_av" /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf
+      install -m 0644 "$tmp_av" /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf
       changed=1
-      pe_exec /usr/bin/systemctl restart avahi-daemon.service || true
+      systemctl restart avahi-daemon.service || true
     fi
     rm -f "$tmp_av"
   fi

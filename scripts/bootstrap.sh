@@ -38,6 +38,12 @@ setup_user() {
   fi
   getent group audio >/dev/null 2>&1 || groupadd audio || true
   usermod -aG audio airplay || true
+  
+  # Remove airplay from sudo group if present (security best practice)
+  if groups airplay | grep -q '\bsudo\b'; then
+    log "removing airplay from sudo group for security"
+    deluser airplay sudo || true
+  fi
 }
 
 setup_ssh() {
@@ -77,12 +83,22 @@ install_wrapper() {
 
 configure_sudoers() {
   local sfile=/etc/sudoers.d/airplay-wyse
+  log "configuring sudoers for airplay user"
+  
+  # Create sudoers file with proper permissions
   {
     echo 'Defaults:airplay !requiretty'
     echo 'airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run'
   } > "$sfile"
   chmod 440 "$sfile"
-  visudo -c >/dev/null || die "sudoers validation failed"
+  
+  # Validate sudoers configuration
+  if ! visudo -c >/dev/null 2>&1; then
+    rm -f "$sfile"
+    die "sudoers validation failed"
+  fi
+  
+  log "sudoers configuration validated successfully"
 }
 
 install_units() {
@@ -115,6 +131,20 @@ write_inventory() {
   chown -R airplay:airplay "$repo_dir/inventory"
 }
 
+setup_runtime_dirs() {
+  local repo_dir="$1"
+  log "setting up runtime directories"
+  
+  # Create runtime directories that converge expects
+  install -d -m 0755 /run/airplay
+  install -d -m 0755 /run/airplay/tmp
+  chown -R airplay:airplay /run/airplay
+  
+  # Create state directory
+  install -d -m 0755 /var/lib/airplay_wyse
+  chown airplay:airplay /var/lib/airplay_wyse
+}
+
 enable_services() {
   systemctl enable --now reconcile.timer
   if [[ "${BOOTSTRAP_RUN_RECONCILE:-1}" == "1" ]]; then
@@ -138,6 +168,7 @@ main() {
   clone_repo "$REPO_URL" "$REPO_DIR"
   install_wrapper "$REPO_DIR"
   configure_sudoers
+  setup_runtime_dirs "$REPO_DIR"
   install_units "$REPO_DIR"
   if [[ -n "${BOOTSTRAP_AIRPLAY_NAME:-}" || -n "${BOOTSTRAP_NIC:-}" || -n "${BOOTSTRAP_TARGET_TAG:-}" ]]; then
     write_inventory "$REPO_DIR"
@@ -150,4 +181,3 @@ main() {
 }
 
 main "$@"
-

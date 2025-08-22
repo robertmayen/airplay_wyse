@@ -5,14 +5,26 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=airplay
+User=root
+Group=root
 WorkingDirectory=/opt/airplay_wyse
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/airplay_wyse/bin/converge
+# Systemd sandboxing for security
 NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/lib/airplay_wyse /run/airplay /opt/airplay_wyse
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete @debug @mount
+ReadWritePaths=/var/lib/airplay_wyse /run/airplay /opt/airplay_wyse /etc /run /var
 SuccessExitStatus=0 2 3 6 10 11
 RemainAfterExit=no
 
