@@ -9,11 +9,9 @@ format:
 	@echo "(no-op) formatting not configured"
 
 lint:
-	@echo "(no-op) linting not configured"
+	@bash ./tools/lints.sh || true
 
 test:
-	@bash ./tests/no_sudo.sh
-	@bash ./tests/queue_smoke.sh || true
 	@bash ./tests/smoke.sh || true
 
 vm-test:

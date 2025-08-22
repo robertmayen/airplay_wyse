@@ -3,7 +3,7 @@ set -euo pipefail
 
 # AirPlay Wyse converge orchestrator (minimal, idempotent)
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+REPO_DIR="/opt/airplay_wyse"
 STATE_DIR="/var/lib/airplay_wyse"
 RUN_DIR="/run/airplay"
 ETC_DIR="/etc/airplay_wyse"
@@ -21,13 +21,10 @@ EXIT_SYSTEMD=11
 log() { echo "$(date --iso-8601=seconds) [converge] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-systemd_run() {
-  # Usage: systemd_run <profile> -- <command...>
-  local profile="$1"; shift; [[ "${1:-}" == "--" ]] && shift || true
-  if [[ ! -x /usr/local/sbin/airplay-sd-run ]]; then
-    fail "missing /usr/local/sbin/airplay-sd-run"
-  fi
-  sudo /usr/local/sbin/airplay-sd-run "$profile" -- "$*"
+pe_exec() {
+  # Secure privilege escalation via wrapper (single privilege path)
+  # Usage: pe_exec <command> [args...]
+  sudo /usr/local/sbin/airplay-sd-run "$@"
 }
 
 # Bootstrap logic removed: wrapper/sudoers must be preinstalled.
@@ -41,7 +38,7 @@ ensure_dirs() {
   : # no queue; transient privileged actions via systemd-run
 }
 
-# GitOps: ensure systemd units on device match repo; bootstrap broker sandbox if needed.
+# GitOps: ensure systemd units on device match repo.
 sync_systemd_units() {
   local changed=0
   # Ensure systemd units on device match repo; write directly via transient unit
@@ -52,20 +49,19 @@ sync_systemd_units() {
     base=$(basename "$src")
     dest="/etc/systemd/system/$base"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      systemd_run unit-write -- \
-        "/usr/bin/install -m 0644 '$src' '$dest'"
+      pe_exec /usr/bin/install -m 0644 "$src" "$dest"
       changed=1
     fi
   done
   # Ensure converge drop-in override mirrors SuccessExitStatus
   local conv_ov_src="$REPO_DIR/systemd/overrides/converge.service.d/override.conf"
   if [[ -f "$conv_ov_src" ]]; then
-    systemd_run unit-write -- "/usr/bin/install -d -m 0755 /etc/systemd/system/converge.service.d"
-    systemd_run unit-write -- "/usr/bin/install -m 0644 '$conv_ov_src' /etc/systemd/system/converge.service.d/override.conf"
+    pe_exec /usr/bin/install -d -m 0755 /etc/systemd/system/converge.service.d
+    pe_exec /usr/bin/install -m 0644 "$conv_ov_src" /etc/systemd/system/converge.service.d/override.conf
     changed=1
   fi
   if [[ $changed -eq 1 ]]; then
-    systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+    pe_exec /usr/bin/systemctl daemon-reload
     # Log SuccessExitStatus configured for converge.service for verification
     local ses
     ses=$(systemctl show -p SuccessExitStatus --value converge.service 2>/dev/null || echo)
@@ -81,14 +77,14 @@ sync_systemd_units() {
   for u in "${obsolete[@]}"; do
     if [[ -f "$u" ]]; then
       local uname; uname=$(basename "$u")
-      systemd_run svc-restart -- "/usr/bin/systemctl stop '$uname' || true"
-      systemd_run svc-restart -- "/usr/bin/systemctl disable '$uname' || true"
-      systemd_run unit-write -- "/bin/rm -f '$u'"
+      pe_exec /usr/bin/systemctl stop "$uname" || true
+      pe_exec /usr/bin/systemctl disable "$uname" || true
+      pe_exec /bin/rm -f "$u"
       removed=1
     fi
   done
   if [[ $removed -eq 1 ]]; then
-    systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+    pe_exec /usr/bin/systemctl daemon-reload
   fi
 }
 
@@ -122,40 +118,7 @@ host_key() {
   hostname -s | tr '[:upper:]' '[:lower:]'
 }
 
-verify_signed_tag() {
-  # Optional GPG verification of current tag; disabled by default.
-  # Enable with AIRPLAY_VERIFY_TAGS=1 or inventory key `verify_gpg: true`.
-  if ! command -v git >/dev/null; then
-    log "git not found; skipping verification"
-    return 0
-  fi
-  local verify_flag tag
-  verify_flag="${AIRPLAY_VERIFY_TAGS:-}"
-  if [[ -z "$verify_flag" && -n "${INVENTORY_FILE:-}" && -f "$INVENTORY_FILE" ]]; then
-    if grep -Eiq '^verify_gpg:\s*(true|yes|1)\b' "$INVENTORY_FILE"; then
-      verify_flag=1
-    else
-      verify_flag=0
-    fi
-  fi
-  verify_flag=${verify_flag:-0}
-
-  if [[ "$verify_flag" != "1" ]]; then
-    log "GPG tag verification disabled (using SSH/Git SHA workflows)"
-    return 0
-  fi
-
-  if ! tag=$(git -C "$REPO_DIR" describe --tags --exact-match 2>/dev/null); then
-    log "Not on a tag; verification failed"
-    return 1
-  fi
-  if ! git -C "$REPO_DIR" verify-tag "$tag" >/dev/null 2>&1; then
-    log "Tag $tag failed signature verification"
-    return 1
-  fi
-  log "Verified signed tag: $tag"
-  return 0
-}
+# GPG verification is performed in bin/update. Converge does not re-verify tags.
 
 held_check() {
   if [[ -f "$ETC_DIR/hold" || -f "$STATE_DIR/hold" ]]; then
@@ -210,170 +173,7 @@ render_template() {
   rm -f "$tmp"
 }
 
-needs_update() {
-  local file="$1" key="$2" cur new
-  new=$(sha256_file "$file")
-  cur=""
-  [[ -f "$STATE_DIR/hashes/$key" ]] && cur=$(cat "$STATE_DIR/hashes/$key")
-  if [[ "$new" != "$cur" ]]; then
-    local tmph; tmph=$(mktemp -p "$TMPDIR"); echo "$new" >"$tmph"
-    install -m 0600 "$tmph" "$STATE_DIR/hashes/$key" 2>/dev/null || true
-    rm -f "$tmph"
-    return 0
-  fi
-  return 1
-}
-
-resolve_alsa_device() {
-  # Auto-detect resolver (USB preferred, then PCI/built-in). Optional inventory override via alsa.vendor_id/product_id.
-  # Sets: ALSA_DEVICE (string) and ALSA_CARD (numeric card index used for mixer detection).
-  local vid pid serial devnum
-  vid=$(yaml_get 'alsa.vendor_id' || true)
-  pid=$(yaml_get 'alsa.product_id' || true)
-  serial=$(yaml_get 'alsa.serial' || true)
-  devnum=$(yaml_get 'alsa.device_num' || true)
-  devnum=${devnum:-0}
-
-  ALSA_CARD=""
-
-  # Helper: first playback device number for a card index
-  first_playback_devnum_for_card() {
-    local card_idx="$1"
-    local d
-    for d in /proc/asound/card"$card_idx"/pcm*p; do
-      [[ -e "$d" ]] || continue
-      d=$(basename "$d") # e.g., pcm0p
-      echo "${d#pcm}" | tr -d 'p'
-      return 0
-    done
-    return 1
-  }
-
-  # Helper: resolve by-id symlink to card index if possible
-  card_index_from_byid() {
-    local path="$1" real
-    real=$(readlink -f "$path" 2>/dev/null || true)
-    if [[ "$real" =~ /dev/snd/.*C([0-9]+)D[0-9]+ ]]; then
-      echo "${BASH_REMATCH[1]}"
-      return 0
-    fi
-    echo ""
-    return 1
-  }
-
-  # Simple helper: try to open a PCM for a very short time (silent zeroes)
-  try_open_device() {
-    local dev="$1"
-    # If aplay is missing, or shairport-sync is active (likely holding the device),
-    # do not negatively judge the device — treat as acceptable.
-    if ! command -v aplay >/dev/null 2>&1; then return 0; fi
-    if systemctl is-active --quiet shairport-sync.service 2>/dev/null; then return 0; fi
-    # Attempt a very short, silent open; tolerate busy/permission errors.
-    local err rc tf; tf=$(mktemp -p "$TMPDIR")
-    set +e
-    timeout 1 aplay -q -t raw -c 2 -f S16_LE -r 44100 -D "$dev" < /dev/zero 2>"$tf"
-    rc=$?
-    set -e
-    if [[ $rc -eq 0 ]]; then rm -f "$tf"; return 0; fi
-    err=$(tr '\n' ' ' <"$tf" | tr -d '\r')
-    rm -f "$tf"
-    # Accept devices that fail due to being busy or permission limited.
-    if echo "$err" | grep -Eqi 'busy|permission denied'; then return 0; fi
-    # Otherwise, treat as not-openable and let the caller try other forms.
-    return 1
-  }
-
-  # 1) Inventory override (USB by VID:PID with optional serial)
-  if [[ -n "${vid:-}" && -n "${pid:-}" ]]; then
-    local byid target
-    byid="/dev/snd/by-id"
-    if [[ -d "$byid" ]]; then
-      for n in "$byid"/*; do
-        [[ -e "$n" ]] || continue
-        if [[ "$n" == *"_${vid}_${pid}"* ]] || [[ "$n" == *"${vid}:${pid}"* ]]; then
-          if [[ -z "$serial" || "$n" == *"${serial}"* ]]; then
-            target="$n"; break
-          fi
-        fi
-      done
-    fi
-    if [[ -n "${target:-}" ]]; then
-      ALSA_DEVICE="$target"
-      ALSA_CARD=$(card_index_from_byid "$target" || true)
-      if [[ -z "${ALSA_CARD:-}" ]]; then
-        # Fallback resolve card index via sysfs VID:PID
-        for cpath in /sys/class/sound/card*/device; do
-          [[ -d "$cpath" ]] || continue
-          local udevdir="$(dirname "$cpath")/.."
-          if [[ -f "$udevdir/idVendor" && -f "$udevdir/idProduct" ]]; then
-            local fv fp fs
-            fv=$(cat "$udevdir/idVendor")
-            fp=$(cat "$udevdir/idProduct")
-            fs=$(cat "$udevdir/serial" 2>/dev/null || echo)
-            if [[ "0x$fv" == "$vid" && "0x$fp" == "$pid" ]]; then
-              if [[ -z "$serial" || "$fs" == "$serial" ]]; then
-                local card
-                card=$(basename "$(dirname "$cpath")"); card=${card#card}
-                ALSA_CARD="$card"; break
-              fi
-            fi
-          fi
-        done
-      fi
-      # Validate device open; try common forms if needed
-      local cand1="plughw:${ALSA_CARD},${devnum}"
-      local cand2="hw:${ALSA_CARD},${devnum}"
-      local cand3="default"
-      if try_open_device "$cand1"; then ALSA_DEVICE="$cand1"; return 0; fi
-      if try_open_device "$cand2"; then ALSA_DEVICE="$cand2"; return 0; fi
-      if try_open_device "$cand3"; then ALSA_DEVICE="$cand3"; return 0; fi
-      # Fall through to auto-detect below
-    fi
-    log "ALSA override VID:PID not found; falling back to auto-detect"
-  fi
-
-  # 2) Auto-detect — USB first
-  local card_dir usb_candidate="" usb_devnum=""
-  for card_dir in /sys/class/sound/card*; do
-    [[ -d "$card_dir" ]] || continue
-    local cidx; cidx=$(basename "$card_dir"); cidx=${cidx#card}
-    local udevdir="$card_dir/device/.."
-    if [[ -f "$udevdir/idVendor" && -f "$udevdir/idProduct" ]]; then
-      local pnum
-      if pnum=$(first_playback_devnum_for_card "$cidx" 2>/dev/null); then
-        usb_candidate="$cidx"; usb_devnum="$pnum"; break
-      fi
-    fi
-  done
-  if [[ -n "${usb_candidate:-}" ]]; then
-    ALSA_CARD="$usb_candidate"
-    # Try preferred forms in order
-    local cand1="plughw:${ALSA_CARD},${usb_devnum}"
-    local cand2="hw:${ALSA_CARD},${usb_devnum}"
-    local cand3="default"
-    if try_open_device "$cand1"; then ALSA_DEVICE="$cand1"; return 0; fi
-    if try_open_device "$cand2"; then ALSA_DEVICE="$cand2"; return 0; fi
-    if try_open_device "$cand3"; then ALSA_DEVICE="$cand3"; return 0; fi
-  fi
-
-  # 3) Fallback — first card with playback (PCI/built-in)
-  for card_dir in /sys/class/sound/card*; do
-    [[ -d "$card_dir" ]] || continue
-    local cidx; cidx=$(basename "$card_dir"); cidx=${cidx#card}
-    local pnum
-    if pnum=$(first_playback_devnum_for_card "$cidx" 2>/dev/null); then
-      ALSA_CARD="$cidx"
-      local cand1="plughw:${ALSA_CARD},${pnum}"
-      local cand2="hw:${ALSA_CARD},${pnum}"
-      local cand3="default"
-      if try_open_device "$cand1"; then ALSA_DEVICE="$cand1"; return 0; fi
-      if try_open_device "$cand2"; then ALSA_DEVICE="$cand2"; return 0; fi
-      if try_open_device "$cand3"; then ALSA_DEVICE="$cand3"; return 0; fi
-    fi
-  done
-
-  return 1
-}
+# removed unused helpers: needs_update, resolve_alsa_device
 
 # Determine ALSA mixer control with override and sensible defaults
 resolve_alsa_mixer() {
@@ -397,38 +197,7 @@ resolve_alsa_mixer() {
   return 0
 }
 
-apply_packages() {
-  # APT-only package management - no longer uses pkg/install.sh
-  local changed=0
-  local did_update=0
-  
-  apt_update() {
-    if [[ $did_update -eq 0 ]]; then
-      systemd_run pkg-ensure -- "/usr/bin/apt-get update -y"
-      did_update=1
-    fi
-  }
-  
-  ensure_pkg() {
-    local pkg="$1"
-    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
-      apt_update
-      systemd_run pkg-ensure -- "/usr/bin/apt-get -y install $pkg"
-      changed=1
-    fi
-  }
-  
-  # Core packages required for AirPlay 2
-  ensure_pkg shairport-sync || return 2
-  ensure_pkg nqptp || return 2
-  ensure_pkg avahi-daemon || return 2
-  ensure_pkg avahi-utils || return 2
-  ensure_pkg jq || return 2
-  ensure_pkg alsa-utils || return 2
-  
-  PACKAGES_CHANGED=$changed
-  return 0
-}
+# Removed duplicate package ensure; see ensure_ap2_packages()/ensure_airplay2_support.
 
 sync_shairport_override() {
   # Ensure shairport-sync has an override to order after nqptp and tighten sandbox
@@ -436,18 +205,18 @@ sync_shairport_override() {
   local changed=0
   if [[ -f "$src" ]]; then
     if [[ ! -d "/etc/systemd/system/shairport-sync.service.d" ]]; then
-      systemd_run unit-write -- "/usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d"
+      pe_exec /usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
       changed=1
     fi
     local dest="/etc/systemd/system/shairport-sync.service.d/override.conf"
     if [[ ! -f "$dest" ]] || ! cmp -s "$src" "$dest"; then
-      systemd_run unit-write -- "/usr/bin/install -m 0644 '$src' '$dest'"
+      pe_exec /usr/bin/install -m 0644 "$src" "$dest"
       changed=1
     fi
   fi
   if [[ $changed -eq 1 ]]; then
-    systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
-    systemd_run svc-restart -- "/usr/bin/systemctl restart airplay-shairport"
+    pe_exec /usr/bin/systemctl daemon-reload
+    pe_exec /usr/bin/systemctl restart airplay-shairport
   fi
   return $changed
 }
@@ -456,10 +225,10 @@ ensure_nqptp_started() {
   # If nqptp service exists, ensure it's enabled and started via transient privileged unit
   if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
     if ! systemctl is-enabled --quiet nqptp.service 2>/dev/null; then
-      systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service"
+      pe_exec /usr/bin/systemctl enable nqptp.service
     fi
     if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
-      systemd_run svc-restart -- "/usr/bin/systemctl start nqptp.service"
+      pe_exec /usr/bin/systemctl start nqptp.service
     fi
   fi
 }
@@ -486,8 +255,8 @@ nqptp_installed() {
 
 ensure_ap2_packages() {
   local did_update=0 changed=0
-  apt_update() { if [[ $did_update -eq 0 ]]; then systemd_run pkg-ensure -- "/usr/bin/apt-get update -y || true" || return 100; did_update=1; fi; }
-  ensure_pkg() { dpkg -s "$1" >/dev/null 2>&1 || { apt_update || return 100; systemd_run pkg-ensure -- "/usr/bin/apt-get -y install $1" || return 100; changed=1; }; }
+  apt_update() { if [[ $did_update -eq 0 ]]; then pe_exec /usr/bin/apt-get update -y || return 100; did_update=1; fi; }
+  ensure_pkg() { dpkg -s "$1" >/dev/null 2>&1 || { apt_update || return 100; pe_exec /usr/bin/apt-get -y install "$1" || return 100; changed=1; }; }
 
   ensure_pkg shairport-sync || return 100
   ensure_pkg nqptp || return 100
@@ -508,20 +277,20 @@ remediate_raop2() {
   local changed=0
   local ovsrc="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
   if [[ -f "$ovsrc" ]]; then
-    systemd_run unit-write -- "/usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d"
-    systemd_run unit-write -- "/usr/bin/install -m 0644 '$ovsrc' /etc/systemd/system/shairport-sync.service.d/override.conf"
+    pe_exec /usr/bin/install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
+    pe_exec /usr/bin/install -m 0644 "$ovsrc" /etc/systemd/system/shairport-sync.service.d/override.conf
     changed=1
   fi
-  systemd_run svc-restart -- "/usr/bin/systemctl daemon-reload"
+  pe_exec /usr/bin/systemctl daemon-reload
   if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
-    systemd_run svc-restart -- "/usr/bin/systemctl enable nqptp.service || true"
-    systemd_run svc-restart -- "/usr/bin/systemctl start nqptp.service || true"
+    pe_exec /usr/bin/systemctl enable nqptp.service || true
+    pe_exec /usr/bin/systemctl start nqptp.service || true
     changed=1
   else
-    systemd_run svc-restart -- "/usr/bin/systemctl restart nqptp.service || true"
+    pe_exec /usr/bin/systemctl restart nqptp.service || true
     changed=1
   fi
-  systemd_run svc-restart -- "/usr/bin/systemctl restart shairport-sync.service || true"
+  pe_exec /usr/bin/systemctl restart shairport-sync.service || true
   echo $changed
 }
 
@@ -568,6 +337,8 @@ apply_configs() {
     return 2
   fi
   ALSA_DEVICE="$probe_out"
+  # Derive ALSA_CARD index from ALSA_DEVICE (format: hw:<card>,<dev>)
+  ALSA_CARD=$(echo "$ALSA_DEVICE" | sed -n 's/^hw:\([0-9]\+\),.*/\1/p')
   resolve_alsa_mixer || true
 
   # Best-effort unmute and set a sensible volume on the chosen mixer
@@ -582,9 +353,9 @@ apply_configs() {
     sed -i "/mixer_control_name/d" "$tmp_ss"
   fi
   if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
-    systemd_run cfg-write -- "/usr/bin/install -m 0644 '$tmp_ss' /etc/shairport-sync.conf"
+    pe_exec /usr/bin/install -m 0644 "$tmp_ss" /etc/shairport-sync.conf
     changed=1
-    systemd_run svc-restart -- "/usr/bin/systemctl restart shairport-sync.service || true"
+    pe_exec /usr/bin/systemctl restart shairport-sync.service || true
   fi
   rm -f "$tmp_ss"
 
@@ -594,13 +365,13 @@ apply_configs() {
     local tmp_av; tmp_av=$(mktemp -p "$TMPDIR")
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
     if [[ ! -d "/etc/avahi/avahi-daemon.conf.d" ]]; then
-      systemd_run cfg-write -- "/usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d"
+      pe_exec /usr/bin/install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
       changed=1
     fi
     if [[ ! -f "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf" ]] || ! cmp -s "$tmp_av" "/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"; then
-      systemd_run cfg-write -- "/usr/bin/install -m 0644 '$tmp_av' /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf"
+      pe_exec /usr/bin/install -m 0644 "$tmp_av" /etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf
       changed=1
-      systemd_run svc-restart -- "/usr/bin/systemctl restart avahi-daemon.service || true"
+      pe_exec /usr/bin/systemctl restart avahi-daemon.service || true
     fi
     rm -f "$tmp_av"
   fi
@@ -634,24 +405,34 @@ check_avahi_raop() {
   # Consider healthy if either AirPlay (_airplay._tcp) or RAOP (_raop._tcp)
   # advertises this device by friendly name, with a fallback to hostname.
   command -v avahi-browse >/dev/null || return 0
-  local name hostn
+  local name hostn browse_out
   name="${AIRPLAY_NAME:-}"
   hostn="$(host_key)"
-  # Try friendly name first (literal, case-insensitive), accept either type
-  if avahi-browse -rt _airplay._tcp 2>/dev/null | grep -Fqi -- "$name"; then return 0; fi
-  if avahi-browse -rt _raop._tcp 2>/dev/null | grep -Fqi -- "$name"; then return 0; fi
-  # Fallback: match hostname appearing in browse output
-  if avahi-browse -rt _airplay._tcp 2>/dev/null | grep -Fqi -- "$hostn"; then return 0; fi
-  if avahi-browse -rt _raop._tcp 2>/dev/null | grep -Fqi -- "$hostn"; then return 0; fi
+  
+  # Get browse output for both service types
+  browse_out=$(timeout 5 avahi-browse -rt _airplay._tcp 2>/dev/null || true)
+  if [[ -n "$browse_out" ]]; then
+    # Ensure our specific device name appears in AirPlay advertisements
+    if echo "$browse_out" | grep -F "_airplay._tcp" | grep -Fqi -- "$name"; then return 0; fi
+    if echo "$browse_out" | grep -F "_airplay._tcp" | grep -Fqi -- "$hostn"; then return 0; fi
+  fi
+  
+  # Fallback to RAOP if AirPlay not found
+  browse_out=$(timeout 5 avahi-browse -rt _raop._tcp 2>/dev/null || true)
+  if [[ -n "$browse_out" ]]; then
+    if echo "$browse_out" | grep -F "_raop._tcp" | grep -Fqi -- "$name"; then return 0; fi
+    if echo "$browse_out" | grep -F "_raop._tcp" | grep -Fqi -- "$hostn"; then return 0; fi
+  fi
+  
   return 1
 }
 
 converge_main() {
   ensure_dirs
 
-  # Phase 1: Wrapper availability (single privilege path)
-  if [[ ! -x /usr/local/sbin/airplay-sd-run ]]; then
-    emit_health "bootstrap_required" "$EXIT_INV" "missing /usr/local/sbin/airplay-sd-run" >/dev/null || true
+  # Phase 1: Direct systemd-run privilege escalation (no wrapper needed)
+  if ! command -v systemd-run >/dev/null 2>&1; then
+    emit_health "bootstrap_required" "$EXIT_INV" "missing systemd-run" >/dev/null || true
     exit "$EXIT_INV"
   fi
 
@@ -660,23 +441,14 @@ converge_main() {
     emit_health "invalid_inventory" "$EXIT_INV" "missing inventory file" >/dev/null || true
     exit "$EXIT_INV"
   fi
-  if ! verify_signed_tag; then
-    emit_health "verify_failed" "$EXIT_VERIFY" "unsigned or invalid tag" >/dev/null || true
-    exit "$EXIT_VERIFY"
-  fi
+  # Tag verification handled in bin/update; skip here for efficiency.
   if ! time_sync_ok; then
     emit_health "degraded" "$EXIT_DEGRADED" "time unsynced" >/dev/null || true
     exit "$EXIT_DEGRADED"
   fi
 
-  # Package ensure
-  PACKAGES_CHANGED=0
+  # Ensure systemd units and proceed to package + RAOP2 support
   sync_systemd_units || true
-  if ! apply_packages; then
-    log "event=pkg_error category=pkg_env_misconfigured summary='package install/update failed'"
-    emit_health "pkg_failed" "$EXIT_PKG" "package install/update failed" >/dev/null || true
-    exit "$EXIT_PKG"
-  fi
 
   # Phase 2: Ensure RAOP2/AirPlay 2 support
   RAOP2_CHANGED=0
@@ -709,7 +481,7 @@ converge_main() {
   fi
 
   # If this run applied changes, report CHANGED and skip health checks
-  if [[ $cfg_rc -eq 1 || ${PACKAGES_CHANGED:-0} -eq 1 || ${RAOP2_CHANGED:-0} -eq 1 ]]; then
+  if [[ $cfg_rc -eq 1 || ${RAOP2_CHANGED:-0} -eq 1 ]]; then
     emit_health "healthy_changed" "$EXIT_CHANGED" "changes applied or enqueued root ops" >/dev/null || true
     exit "$EXIT_CHANGED"
   fi

@@ -1,86 +1,168 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# airplay-sd-run: locked-down wrapper for systemd-run (single privilege path)
-# Usage: airplay-sd-run <PROFILE> -- <command ...>
-# Profiles: svc-restart | cfg-write | unit-write | pkg-ensure
+# AirPlay Wyse Privilege Escalation Wrapper
+# Secure systemd-run wrapper with profile-based access control
+# Usage: airplay-sd-run <command> [args...]
 
-PROFILE="${1:-}"
-shift || true
-if [[ -z "${PROFILE}" || "${1:-}" != "--" ]]; then
-  echo "USAGE: $0 <PROFILE> -- <command...>" >&2
-  exit 2
-fi
-shift # drop --
+readonly SCRIPT_NAME="$(basename "$0")"
+readonly LOG_PREFIX="[airplay-sd-run]"
 
-case "$PROFILE" in
-  svc-restart|cfg-write|unit-write|pkg-ensure) : ;;
-  *) echo "Unknown profile: $PROFILE" >&2; exit 2 ;;
-esac
+log() {
+    logger -t "$SCRIPT_NAME" "$*"
+    echo "$LOG_PREFIX $*" >&2
+}
 
-host=$(hostname -s 2>/dev/null || hostname)
-if [[ -r /proc/sys/kernel/random/uuid ]]; then run_id=$(cut -d- -f1 </proc/sys/kernel/random/uuid); else run_id=$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n'); fi
-unit="airplay-tx-${host}-${PROFILE}-${run_id}"
-desc="airplay-${host} ${unit} CAP=${PROFILE} RUN_ID=${run_id}"
-log_path="/var/lib/airplay_wyse/pkg/${unit}.log"
+die() {
+    log "ERROR: $*"
+    exit 1
+}
 
-props=(
-  --wait --collect
-  --unit "$unit"
-  --property=Type=exec
-  --property=SyslogIdentifier=airplay-agent
-  --property=Description="$desc"
-  --property=NoNewPrivileges=yes
-  --property=ProtectHome=read-only
-  --property=ProtectSystem=strict
-  --property=PrivateTmp=yes
-  --property=CapabilityBoundingSet=
-  --property=DevicePolicy=closed
-  --property=LockPersonality=yes
-  --property=MemoryDenyWriteExecute=yes
-)
+# Validate command is absolute path and executable
+validate_command() {
+    local cmd="$1"
+    
+    # Must be absolute path
+    [[ "$cmd" =~ ^/ ]] || die "Command must be absolute path: $cmd"
+    
+    # Must exist and be executable
+    [[ -x "$cmd" ]] || die "Command not found or not executable: $cmd"
+    
+    # Allowlist of permitted executables
+    case "$cmd" in
+        /usr/bin/apt-get|\
+        /usr/bin/dpkg|\
+        /usr/bin/systemctl|\
+        /usr/bin/install|\
+        /bin/rm|\
+        /bin/mkdir)
+            return 0
+            ;;
+        *)
+            die "Command not in allowlist: $cmd"
+            ;;
+    esac
+}
 
-case "$PROFILE" in
-  cfg-write)
-    props+=( --property=ReadWritePaths=/etc ) ;;
-  unit-write)
-    props+=( --property=ReadWritePaths=/etc/systemd/system ) ;;
-  pkg-ensure)
-    props+=( --property=ReadWritePaths=/var/cache/apt \
-             --property=ReadWritePaths=/var/lib/apt \
-             --property=ReadWritePaths=/var/lib/dpkg \
-             --property=ReadWritePaths=/var/log \
-             --property=ReadWritePaths=/etc/apt \
-             --property=ReadWritePaths=/var/lib/airplay_wyse \
-             --property=ReadWritePaths=/tmp \
-             --property=ReadWritePaths=/var/tmp \
-             --property=Environment=DEBIAN_FRONTEND=noninteractive \
-             --property=Environment=APT_LISTCHANGES_FRONTEND=none \
-             --property=Environment=NEEDRESTART_MODE=a \
-             --property=After=network-online.target \
-             --property=Wants=network-online.target ) ;;
-  svc-restart)
-    : ;;
-esac
+# Optional: basic validation of systemctl invocations
+validate_systemctl_args() {
+    # Require a known action as the first argument
+    local action="$1"; shift || true
+    case "$action" in
+        enable|disable|start|stop|restart|daemon-reload)
+            return 0
+            ;;
+        *)
+            die "systemctl action not permitted: ${action:-<none>}"
+            ;;
+    esac
+}
 
-t0=$(date +%s%3N 2>/dev/null || date +%s)
-/usr/bin/systemd-run "${props[@]}" /bin/bash -lc "mkdir -p /var/lib/airplay_wyse/pkg; set -o pipefail; ( $* ) 2>&1 | tee -a '$log_path'"
-rc=$?
-t1=$(date +%s%3N 2>/dev/null || date +%s)
-if [[ ${#t0} -gt 10 || ${#t1} -gt 10 ]]; then dur=$((t1 - t0)); else dur=$(( (t1 - t0) * 1000 )); fi
+# Determine systemd security profile based on command
+get_security_profile() {
+    local cmd="$1"
+    
+    case "$cmd" in
+        /usr/bin/apt-get|/usr/bin/dpkg)
+            # Package management needs network access
+            echo "pkg"
+            ;;
+        /usr/bin/systemctl)
+            # Service management
+            echo "systemd"
+            ;;
+        /usr/bin/install|/bin/rm|/bin/mkdir|/usr/bin/tee)
+            # File operations
+            echo "file"
+            ;;
+        *)
+            echo "default"
+            ;;
+    esac
+}
 
-if command -v systemd-cat >/dev/null 2>&1; then
-  if [[ $rc -eq 0 ]]; then
-    systemd-cat -t airplay-agent echo "RESULT=OK CAP=${PROFILE} RUN_ID=${run_id} LOG_PATH=${log_path} DURATION_MS=${dur} RC=${rc}"
-  else
-    systemd-cat -t airplay-agent echo "RESULT=ERR CAP=${PROFILE} RUN_ID=${run_id} LOG_PATH=${log_path} DURATION_MS=${dur} RC=${rc}"
-  fi
-fi
+# Build systemd-run command with security properties
+build_systemd_run() {
+    local profile="$1"
+    shift
+    
+    local -a props=(
+        "--wait"
+        "--collect" 
+        "--quiet"
+        "--uid=0"
+        "--gid=0"
+        "--property=Type=exec"
+        "--property=NoNewPrivileges=yes"
+        "--property=ProtectSystem=strict"
+        "--property=ProtectHome=yes"
+        "--property=PrivateTmp=yes"
+        "--property=MemoryDenyWriteExecute=yes"
+        "--property=SystemCallFilter=@system-service"
+        "--property=SystemCallFilter=~@privileged"
+        "--property=SystemCallFilter=~@resources"
+        "--property=CapabilityBoundingSet="
+        "--property=AmbientCapabilities="
+    )
+    
+    # Profile-specific properties
+    case "$profile" in
+        "pkg")
+            props+=(
+                "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6"
+                "--property=ReadWritePaths=/var/cache/apt /var/lib/apt /var/lib/dpkg"
+            )
+            ;;
+        "systemd")
+            props+=(
+                "--property=RestrictAddressFamilies=AF_UNIX"
+                "--property=ReadWritePaths=/etc/systemd /run/systemd"
+            )
+            ;;
+        "file")
+            props+=(
+                "--property=RestrictAddressFamilies=AF_UNIX"
+                "--property=ReadWritePaths=/etc /var"
+            )
+            ;;
+        *)
+            props+=(
+                "--property=RestrictAddressFamilies=AF_UNIX"
+                "--property=ReadWritePaths=/var"
+            )
+            ;;
+    esac
+    
+    # Execute via systemd-run
+    systemd-run "${props[@]}" -- "$@"
+}
 
-if [[ $rc -ne 0 ]]; then
-  echo "RESULT=ERR CAP=${PROFILE} RUN_ID=${run_id} LOG_PATH=${log_path} RC=${rc}" >&2
-  exit $rc
-fi
-echo "RESULT=OK CAP=${PROFILE} RUN_ID=${run_id} LOG_PATH=${log_path}" >&2
-exit 0
+main() {
+    [[ $# -gt 0 ]] || die "Usage: $SCRIPT_NAME <command> [args...]"
+    
+    local cmd="$1"
+    validate_command "$cmd"
+    
+    local profile
+    profile=$(get_security_profile "$cmd")
 
+    log "Executing: $* (profile: $profile)"
+
+    if [[ "$cmd" == "/usr/bin/systemctl" ]]; then
+        # Validate systemctl subcommand is within allowlist
+        [[ $# -ge 2 ]] || die "systemctl requires an action"
+        shift  # drop cmd path; next is action
+        validate_systemctl_args "$1"
+        # Rebuild argv with cmd path restored for execution
+        set -- "/usr/bin/systemctl" "$@"
+    fi
+
+    # Execute with appropriate security profile
+    build_systemd_run "$profile" "$@"
+    local exit_code=$?
+    
+    log "Command completed with exit code: $exit_code"
+    return $exit_code
+}
+
+main "$@"

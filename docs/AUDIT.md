@@ -1,5 +1,7 @@
 # Repository Audit Report
 
+NOTE: Archived for reference. The repository has been simplified further to use a single privilege wrapper and a hardened converge unit. See docs/OPERATIONS.md and PRIVILEGE_ESCALATION_REPORT.md for the current model.
+
 **Date:** 2025-01-22  
 **Goal:** Minimal AirPlay 2 receiver on Wyse 5070 with USB DAC via APT-only converge
 
@@ -24,7 +26,6 @@
 | `scripts/ci/` | DEAD | CI helpers not required for minimal path |
 | `scripts/ops/` | DEAD | Provisioning helpers out of scope |
 | `cfg/shairport-sync.conf.tmpl` | CORE | Shairport configuration template |
-| `cfg/nqptp.conf.tmpl` | CORE | NQPTP configuration template |
 | `cfg/avahi/` | CORE | Avahi interface restriction templates |
 | `systemd/reconcile.service` | CORE | Update + converge service |
 | `systemd/reconcile.timer` | CORE | Periodic trigger for reconcile |
@@ -98,7 +99,6 @@ airplay_wyse/
 │   └── airplay-sd-run
 ├── cfg/
 │   ├── shairport-sync.conf.tmpl
-│   ├── nqptp.conf.tmpl
 │   └── avahi/
 ├── systemd/
 │   ├── reconcile.service

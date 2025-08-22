@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+REPO_DIR="/opt/airplay_wyse"
 
 log() { printf '%s [reconcile] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
@@ -19,4 +19,3 @@ main() {
 }
 
 main "$@"
-

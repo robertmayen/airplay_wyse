@@ -48,9 +48,9 @@ echo ""
 echo "=== mDNS Advertisement ==="
 if command -v avahi-browse >/dev/null 2>&1; then
   echo -n "_airplay._tcp: "
-  avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && echo "visible" || echo "not visible"
+  timeout 5 avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && echo "visible" || echo "not visible"
   echo -n "_raop._tcp: "
-  avahi-browse -rt _raop._tcp 2>/dev/null | grep -q "_raop._tcp" && echo "visible" || echo "not visible"
+  timeout 5 avahi-browse -rt _raop._tcp 2>/dev/null | grep -q "_raop._tcp" && echo "visible" || echo "not visible"
 else
   echo "avahi-browse not installed"
 fi

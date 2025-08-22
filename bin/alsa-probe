@@ -5,7 +5,7 @@ set -euo pipefail
 # Preference: inventory overrides -> USB DACs -> first available playback
 # Exits non-zero if no playable device can be determined.
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+REPO_DIR="/opt/airplay_wyse"
 
 # Optional inventory
 host_short() { hostname -s 2>/dev/null || hostname; }
@@ -59,11 +59,11 @@ if [[ -n "${vid:-}" && -n "${pid:-}" ]]; then
   done
 fi
 
-# Next: any USB card
+# Next: any USB card (detected via sysfs idVendor/idProduct)
 for cdir in /sys/class/sound/card*; do
   [[ -d "$cdir" ]] || continue
-  if udevadm info -q path -n "$cdir" 2>/dev/null | grep -qi usb || \
-     lsusb 1>/dev/null 2>&1; then
+  up="$(dirname "$cdir")/device/.."
+  if [[ -f "$up/idVendor" && -f "$up/idProduct" ]]; then
     card=$(basename "$cdir"); card=${card#card}
     if p=$(first_playback_dev "$card"); then
       echo "hw:${card},${devnum:-$p}"; exit 0
@@ -81,4 +81,3 @@ for cdir in /sys/class/sound/card*; do
 done
 
 exit 1
-

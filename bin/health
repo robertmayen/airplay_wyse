@@ -1,52 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+REPO_DIR="/opt/airplay_wyse"
 STATE_DIR="/var/lib/airplay_wyse"
 
-status=0
+# Read-only viewer: prints last-health.json if available and augments with quick probes
 
-version_str=""
-if command -v shairport-sync >/dev/null 2>&1; then
-  version_str=$(shairport-sync -V 2>&1 | head -1 || true)
-fi
+echo "=== AirPlay Wyse Health ==="
 
-ap2=false
-if echo "$version_str" | grep -q "AirPlay2"; then ap2=true; fi
-
-nqptp_active=false
-if systemctl is-active --quiet nqptp 2>/dev/null; then nqptp_active=true; fi
-
-mdns_airplay=false
-mdns_raop=false
-if command -v avahi-browse >/dev/null 2>&1; then
-  avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && mdns_airplay=true || true
-  avahi-browse -rt _raop._tcp 2>/dev/null | grep -q "_raop._tcp" && mdns_raop=true || true
-fi
-
-alsa_dev=""
-if "$REPO_DIR/bin/alsa-probe" >/dev/null 2>&1; then
-  alsa_dev=$("$REPO_DIR/bin/alsa-probe" 2>/dev/null || true)
-fi
-
-# Determine exit code
-if ! command -v shairport-sync >/dev/null 2>&1 || ! systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
-  status=10
-elif [[ "$ap2" != true || "$mdns_airplay" != true ]]; then
-  status=3
+if [[ -f "$STATE_DIR/last-health.json" ]]; then
+  if command -v jq >/dev/null 2>&1; then
+    jq . "$STATE_DIR/last-health.json" 2>/dev/null || cat "$STATE_DIR/last-health.json"
+  else
+    cat "$STATE_DIR/last-health.json"
+  fi
 else
-  status=0
+  echo "No last-health.json present"
 fi
 
-mkdir -p "$STATE_DIR" 2>/dev/null || true
-jq -n \
-  --arg version "$version_str" \
-  --arg alsa "$alsa_dev" \
-  --argjson ap2 "$ap2" \
-  --argjson nqact "$nqptp_active" \
-  --argjson air "$mdns_airplay" \
-  --argjson raop "$mdns_raop" \
-  '{version:{string:$version}, nqptp:{active:$nqact}, mdns:{airplay:$air, raop:$raop}, alsa:{device:$alsa}}' \
-  | tee "$STATE_DIR/last-health.json"
+echo
+echo "--- Runtime probes ---"
+if command -v shairport-sync >/dev/null 2>&1; then
+  shairport-sync -V 2>&1 | head -1 | sed 's/^/shairport: /'
+fi
+if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+  systemctl is-active --quiet nqptp 2>/dev/null && echo "nqptp: active" || echo "nqptp: inactive"
+fi
+if command -v avahi-browse >/dev/null 2>&1; then
+  timeout 5 avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && echo "mdns: _airplay visible" || echo "mdns: _airplay not visible"
+fi
 
-exit "$status"
+exit 0

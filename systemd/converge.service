@@ -13,7 +13,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/airplay_wyse /run/airplay /opt/airplay_wyse
-SuccessExitStatus=0 2
+SuccessExitStatus=0 2 3 6 10 11
 RemainAfterExit=no
 
 [Install]

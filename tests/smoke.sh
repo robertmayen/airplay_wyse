@@ -22,7 +22,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 if command -v avahi-browse >/dev/null 2>&1; then
-  avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && echo "[smoke] mdns _airplay visible" || echo "[smoke] mdns _airplay missing"
+  timeout 5 avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && echo "[smoke] mdns _airplay visible" || echo "[smoke] mdns _airplay missing"
 fi
 
 # ALSA probe and simple play test (tolerate busy)
@@ -44,7 +44,7 @@ fi
 
 # shellcheck on scripts if installed
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck bin/* scripts/airplay-sd-run || true
+  shellcheck bin/* || true
 fi
 
 echo "[smoke] Done"

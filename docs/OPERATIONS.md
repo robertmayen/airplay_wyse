@@ -12,12 +12,14 @@ This document describes the minimal operational workflow for turning a Wyse 5070
 - User `airplay` exists and can run the wrapper with NOPASSWD sudo.
 - Wrapper installed:
   - Copy `scripts/airplay-sd-run` to `/usr/local/sbin/airplay-sd-run` (root-owned, 0755).
-- Sudoers drop-in (example):
+  - **CRITICAL**: Verify wrapper integrity after installation.
+- **Sudoers configuration (SINGLE PRIVILEGE PATH)**:
   ```
   # /etc/sudoers.d/airplay-wyse
   Defaults:airplay !requiretty
-  airplay ALL=(root) NOPASSWD: /usr/bin/systemd-run, /usr/local/sbin/airplay-sd-run
+  airplay ALL=(root) NOPASSWD: /usr/local/sbin/airplay-sd-run
   ```
+  **Note**: Only the wrapper is allowed. Direct `systemd-run` access has been removed for security.
 - Repository cloned to `/opt/airplay_wyse` (owned by `airplay` user).
 - Systemd units installed:
   - Copy `systemd/reconcile.*`, `systemd/converge.service` to `/etc/systemd/system/`.
@@ -44,7 +46,7 @@ alsa:
 
 ## Health & Troubleshooting
 - Health JSON: `/var/lib/airplay_wyse/last-health.json`.
-- Quick view: `./bin/health` (prints JSON + wrapper status checks when available).
+- Quick view: `./bin/health` (read-only viewer; prints JSON and quick probes; does not modify state).
 - Logs: `journalctl -u reconcile -n 200`.
 - Hold updates: `sudo touch /etc/airplay_wyse/hold` (remove to resume).
 
@@ -61,9 +63,37 @@ alsa:
 - No compilers/build toolchains are required on the host. Converge installs packages via APT; if a local `.deb` is present in the repo checkout, it may be installed by `converge` via `dpkg -i`.
 - Avahi drop-in template is provided and applied only if different from the current content.
 
+## Security Update
+
+The wrapper has been updated to fix a critical shell injection vulnerability. Key changes:
+- **No shell invocation**: Commands are executed directly via systemd-run
+- **Input validation**: Executable paths must be absolute and exist
+- **Allowlisting**: Each profile only allows specific executables
+- **Sandboxing**: Comprehensive systemd security properties applied
+
+### Installation
+```bash
+sudo cp scripts/airplay-sd-run /usr/local/sbin/airplay-sd-run
+sudo chown root:root /usr/local/sbin/airplay-sd-run
+sudo chmod 755 /usr/local/sbin/airplay-sd-run
+sudo visudo -c  # Verify sudoers syntax
+```
+
 ## Acceptance Checklist
 - `shairport-sync -V` contains `AirPlay2`.
 - `systemctl is-active nqptp` returns `active`.
 - `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp`.
 - `bin/alsa-probe` returns an ALSA device string and `aplay -D <device>` can open it (busy tolerated).
 - A second `bin/converge` run returns unchanged (idempotent).
+- **Security**: Wrapper owned by root:root with 755 permissions.
+- **Security**: Only wrapper allowed in sudoers (no direct systemd-run access).
+
+## Converge Exit Codes
+- 0: healthy (no changes)
+- 2: healthy_changed (changes applied)
+- 3: degraded (missing device, nqptp not healthy, mDNS not visible)
+- 4: invalid_inventory (missing/invalid inventory)
+- 5: verify_failed (tag verification failure; verification occurs in `bin/update`)
+- 6: held (hold file present)
+- 10: pkg_failed (package install/update failed)
+- 11: systemd_failed (service restart failed)
