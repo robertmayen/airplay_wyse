@@ -34,6 +34,8 @@ validate_command() {
         /usr/bin/dpkg|\
         /usr/bin/systemctl|\
         /usr/bin/install|\
+        /usr/bin/tee|\
+        /usr/sbin/useradd|\
         /bin/rm|\
         /bin/mkdir)
             return 0
@@ -108,9 +110,12 @@ build_systemd_run() {
     # Profile-specific properties
     case "$profile" in
         "pkg")
+            # Package installs need broad write access; keep syscall and tmp/home protections relaxed.
+            # Do not restrict ReadWritePaths for dpkg to function correctly.
             props+=(
                 "--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6"
-                "--property=ReadWritePaths=/var/cache/apt /var/lib/apt /var/lib/dpkg"
+                "--property=ProtectSystem=off"
+                "--property=ProtectHome=false"
             )
             ;;
         "systemd")

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Test script for AirPlay 2 functionality
+
+log() { echo "$(date --iso-8601=seconds) [test-airplay2] $*"; }
+fail() { log "ERROR: $*"; exit 1; }
+
+test_nqptp() {
+  log "Testing nqptp service..."
+  
+  if ! systemctl is-active --quiet nqptp.service; then
+    fail "nqptp service is not active"
+  fi
+  
+  if ! systemctl is-enabled --quiet nqptp.service; then
+    fail "nqptp service is not enabled"
+  fi
+  
+  log "✓ nqptp service is active and enabled"
+}
+
+test_shairport_sync() {
+  log "Testing shairport-sync..."
+  
+  if ! command -v shairport-sync >/dev/null 2>&1; then
+    fail "shairport-sync binary not found"
+  fi
+  
+  local version_output
+  version_output=$(shairport-sync -V 2>&1 || true)
+  
+  if ! echo "$version_output" | grep -q "AirPlay2"; then
+    fail "shairport-sync does not have AirPlay 2 support"
+  fi
+  
+  if ! systemctl is-active --quiet shairport-sync.service; then
+    fail "shairport-sync service is not active"
+  fi
+  
+  log "✓ shairport-sync has AirPlay 2 support and is active"
+  log "  Version: $(echo "$version_output" | head -1)"
+}
+
+test_avahi_advertisement() {
+  log "Testing Avahi service advertisement..."
+  
+  if ! command -v avahi-browse >/dev/null 2>&1; then
+    log "⚠ avahi-browse not available, skipping advertisement test"
+    return 0
+  fi
+  
+  local hostname
+  hostname=$(hostname -s | tr '[:upper:]' '[:lower:]')
+  
+  # Check for AirPlay service advertisement
+  local browse_output
+  browse_output=$(timeout 10 avahi-browse -rt _airplay._tcp 2>/dev/null || true)
+  
+  if [[ -n "$browse_output" ]] && echo "$browse_output" | grep -qi "$hostname"; then
+    log "✓ AirPlay service is being advertised"
+    return 0
+  fi
+  
+  # Fallback to RAOP
+  browse_output=$(timeout 10 avahi-browse -rt _raop._tcp 2>/dev/null || true)
+  
+  if [[ -n "$browse_output" ]] && echo "$browse_output" | grep -qi "$hostname"; then
+    log "✓ RAOP service is being advertised"
+    return 0
+  fi
+  
+  log "⚠ No AirPlay/RAOP service advertisement found"
+}
+
+test_alsa_device() {
+  log "Testing ALSA device..."
+  
+  if ! command -v aplay >/dev/null 2>&1; then
+    log "⚠ aplay not available, skipping ALSA test"
+    return 0
+  fi
+  
+  # Check if we can list audio devices
+  if ! aplay -l >/dev/null 2>&1; then
+    log "⚠ No ALSA audio devices found"
+    return 0
+  fi
+  
+  log "✓ ALSA audio devices are available"
+}
+
+main() {
+  log "Starting AirPlay 2 functionality tests..."
+  
+  test_nqptp
+  test_shairport_sync
+  test_avahi_advertisement
+  test_alsa_device
+  
+  log "✓ All AirPlay 2 tests completed successfully"
+  log "The system should now be discoverable as an AirPlay receiver"
+}
+
+main "$@"

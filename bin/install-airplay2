@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# AirPlay 2 source installation script for Wyse 5070
+# Builds and installs nqptp and shairport-sync with AirPlay 2 support
+
+REPO_DIR="/opt/airplay_wyse"
+STATE_DIR="/var/lib/airplay_wyse"
+TMPDIR="/run/airplay/tmp"
+
+log() { echo "$(date --iso-8601=seconds) [install-airplay2] $*"; }
+fail() { log "ERROR: $*"; exit 1; }
+
+pe_exec() {
+  # Secure privilege escalation via wrapper (root-required operations only)
+  sudo /usr/local/sbin/airplay-sd-run "$@"
+}
+
+ensure_build_deps() {
+  local did_update=0
+  apt_update() { 
+    if [[ $did_update -eq 0 ]]; then 
+      pe_exec /usr/bin/apt-get update -y || return 1
+      did_update=1
+    fi
+  }
+  
+  ensure_pkg() { 
+    if ! dpkg -s "$1" >/dev/null 2>&1; then
+      apt_update || return 1
+      pe_exec /usr/bin/apt-get -y install "$1" || return 1
+    fi
+  }
+
+  log "Installing build dependencies..."
+  
+  # Basic build tools
+  ensure_pkg build-essential
+  ensure_pkg git
+  ensure_pkg autoconf
+  ensure_pkg automake
+  ensure_pkg libtool
+  ensure_pkg pkg-config
+  ensure_pkg xmltoman
+  
+  # Core dependencies
+  ensure_pkg libpopt-dev
+  ensure_pkg libconfig-dev
+  ensure_pkg libasound2-dev
+  ensure_pkg libavahi-client-dev
+  ensure_pkg libmbedtls-dev
+  ensure_pkg libsoxr-dev
+  
+  # AirPlay 2 specific dependencies
+  ensure_pkg xxd
+  ensure_pkg libplist-dev
+  ensure_pkg libsodium-dev
+  ensure_pkg libgcrypt-dev
+  ensure_pkg libavutil-dev
+  ensure_pkg libavcodec-dev
+  ensure_pkg libavformat-dev
+  ensure_pkg uuid-dev
+  
+  # Runtime dependencies
+  ensure_pkg avahi-daemon
+  ensure_pkg avahi-utils
+  ensure_pkg jq
+  ensure_pkg alsa-utils
+}
+
+install_nqptp() {
+  log "Installing nqptp..."
+  
+  local build_dir="/tmp/nqptp-build"
+  rm -rf "$build_dir"
+  mkdir -p "$build_dir"
+  
+  # Clone nqptp
+  git clone https://github.com/mikebrady/nqptp.git "$build_dir"
+  
+  # Build and install
+  cd "$build_dir"
+  autoreconf -i -f
+  ./configure --with-systemd-startup
+  make -j"$(nproc || echo 4)"
+  pe_exec /usr/bin/make install
+  
+  # Create nqptp user if it doesn't exist
+  pe_exec /usr/sbin/useradd -r -s /usr/sbin/nologin -U -M nqptp || true
+  
+  # Install and enable systemd service
+  pe_exec /usr/bin/install -m 0644 nqptp.service /etc/systemd/system/nqptp.service
+  pe_exec /usr/bin/systemctl daemon-reload
+  pe_exec /usr/bin/systemctl enable --now nqptp
+  
+  # Cleanup
+  rm -rf "$build_dir"
+  
+  log "nqptp installation completed"
+}
+
+install_shairport_sync() {
+  log "Installing shairport-sync with AirPlay 2 support..."
+  
+  local build_dir="/tmp/shairport-sync-build"
+  rm -rf "$build_dir"
+  mkdir -p "$build_dir"
+  
+  # Remove existing shairport-sync package if installed
+  if dpkg -s shairport-sync >/dev/null 2>&1; then
+    log "Removing existing shairport-sync package..."
+    pe_exec /usr/bin/apt-get remove -y shairport-sync
+  fi
+  
+  # Clone shairport-sync
+  git clone https://github.com/mikebrady/shairport-sync.git "$build_dir"
+  
+  # Build and install
+  cd "$build_dir"
+  autoreconf -i -f
+  ./configure --sysconfdir=/etc --with-alsa --with-soxr --with-avahi --with-ssl=mbedtls --with-systemd --with-airplay-2
+  make -j"$(nproc || echo 4)"
+  pe_exec /usr/bin/make install
+  
+  # Install systemd service (use the avahi variant)
+  pe_exec /usr/bin/install -m 0644 scripts/shairport-sync.service-avahi /etc/systemd/system/shairport-sync.service
+  pe_exec /usr/bin/systemctl daemon-reload
+  
+  # Cleanup
+  rm -rf "$build_dir"
+  
+  log "shairport-sync installation completed"
+}
+
+verify_installation() {
+  log "Verifying AirPlay 2 installation..."
+  
+  # Check nqptp
+  if ! systemctl is-active --quiet nqptp.service; then
+    fail "nqptp service is not active"
+  fi
+  
+  # Check shairport-sync binary and AirPlay 2 support
+  if ! command -v shairport-sync >/dev/null 2>&1; then
+    fail "shairport-sync binary not found"
+  fi
+  
+  local version_output
+  version_output=$(shairport-sync -V 2>&1 || true)
+  if ! echo "$version_output" | grep -q "AirPlay2"; then
+    fail "shairport-sync does not have AirPlay 2 support"
+  fi
+  
+  log "AirPlay 2 installation verified successfully"
+  log "shairport-sync version: $(echo "$version_output" | head -1)"
+}
+
+main() {
+  log "Starting AirPlay 2 source installation..."
+  
+  # Ensure temp directory exists
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+  
+  ensure_build_deps
+  install_nqptp
+  install_shairport_sync
+  verify_installation
+  
+  log "AirPlay 2 source installation completed successfully"
+}
+
+main "$@"
