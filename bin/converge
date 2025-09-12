@@ -106,14 +106,33 @@ emit_health() {
   local has_raop2_val=${HEALTH_RAOP2:-}
   local nqptp_inst_val=${HEALTH_NQPTP_INSTALLED:-}
   local nqptp_active_val=${HEALTH_NQPTP_ACTIVE:-}
-  json=$(jq -n \
-    --arg status "$status" \
-    --arg reason "$reason" \
-    --arg version "$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)" \
-    --argjson raop2 "${has_raop2_val:-null}" \
-    --argjson nqptp_installed "${nqptp_inst_val:-null}" \
-    --argjson nqptp_active "${nqptp_active_val:-null}" \
-    '{status:$status, reason:$reason, version:$version, shairport_has_raop2:$raop2, nqptp_installed:$nqptp_installed, nqptp_active:$nqptp_active, ts: now|tojson}') || json="{}"
+  local version
+  version=$(cat "$REPO_DIR/VERSION" 2>/dev/null || echo unknown)
+  if command -v jq >/dev/null 2>&1; then
+    json=$(jq -n \
+      --arg status "$status" \
+      --arg reason "$reason" \
+      --arg version "$version" \
+      --argjson raop2 "${has_raop2_val:-null}" \
+      --argjson nqptp_installed "${nqptp_inst_val:-null}" \
+      --argjson nqptp_active "${nqptp_active_val:-null}" \
+      '{status:$status, reason:$reason, version:$version, shairport_has_raop2:$raop2, nqptp_installed:$nqptp_installed, nqptp_active:$nqptp_active, ts: now|tojson}') || json="{}"
+  else
+    # Fallback JSON without jq (minimal but valid)
+    # Note: booleans may be omitted when not set
+    json='{'
+    json+="\"status\":\"$status\",\"reason\":\"$reason\",\"version\":\"$version\""
+    if [[ "${has_raop2_val:-}" == "true" || "${has_raop2_val:-}" == "false" ]]; then
+      json+=",\"shairport_has_raop2\":${has_raop2_val}"
+    fi
+    if [[ "${nqptp_inst_val:-}" == "true" || "${nqptp_inst_val:-}" == "false" ]]; then
+      json+=",\"nqptp_installed\":${nqptp_inst_val}"
+    fi
+    if [[ "${nqptp_active_val:-}" == "true" || "${nqptp_active_val:-}" == "false" ]]; then
+      json+=",\"nqptp_active\":${nqptp_active_val}"
+    fi
+    json+='}'
+  fi
   local tmpj; tmpj=$(mktemp -p "$TMPDIR")
   printf "%s\n" "$json" >"$tmpj"
   install -m 0644 "$tmpj" "$STATE_DIR/last-health.json" 2>/dev/null || true
@@ -309,21 +328,39 @@ ensure_ap2_packages() {
 remediate_raop2() {
   local changed=0
   local ovsrc="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
+  local ovdst="/etc/systemd/system/shairport-sync.service.d/override.conf"
+
+  # Ensure override exists and only mark changed when content differs
   if [[ -f "$ovsrc" ]]; then
     install -d -m 0755 /etc/systemd/system/shairport-sync.service.d
-    install -m 0644 "$ovsrc" /etc/systemd/system/shairport-sync.service.d/override.conf
-    changed=1
+    if [[ ! -f "$ovdst" ]] || ! cmp -s "$ovsrc" "$ovdst"; then
+      install -m 0644 "$ovsrc" "$ovdst"
+      changed=1
+    fi
   fi
-  systemctl daemon-reload
-  if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
-    systemctl enable nqptp.service || true
-    systemctl start nqptp.service || true
-    changed=1
-  else
-    systemctl restart nqptp.service || true
-    changed=1
+
+  # Reload systemd only if override changed
+  if [[ $changed -eq 1 ]]; then
+    systemctl daemon-reload || true
   fi
-  systemctl restart shairport-sync.service || true
+
+  # Ensure nqptp is enabled and started; avoid restarts if already active
+  if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
+    if ! systemctl is-enabled --quiet nqptp.service 2>/dev/null; then
+      systemctl enable nqptp.service || true
+      changed=1
+    fi
+    if ! systemctl is-active --quiet nqptp.service 2>/dev/null; then
+      systemctl start nqptp.service || true
+      changed=1
+    fi
+  fi
+
+  # Restart shairport only if override changed
+  if [[ $changed -eq 1 ]]; then
+    systemctl restart shairport-sync.service || true
+  fi
+
   echo $changed
 }
 

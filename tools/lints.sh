@@ -61,8 +61,9 @@ check "No source install script present" "[ ! -f bin/install-airplay2 ]"
 # 3. AirPlay 2 Enforcement
 log "Checking AirPlay 2 requirements..."
 
-# shairport-sync version check exists
-check "AirPlay 2 version check present" "grep -q 'shairport-sync -V.*AirPlay2' bin/converge"
+# shairport-sync version check exists (allow separate tokens on different lines)
+check "AirPlay 2 version check present (shairport-sync -V)" "grep -q 'shairport-sync -V' bin/converge"
+check "AirPlay 2 version check present (AirPlay2 token)" "grep -q 'AirPlay2' bin/converge"
 
 # NQPTP ordering enforced
 check "NQPTP systemd ordering present" "grep -q 'Requires=nqptp.service' systemd/overrides/shairport-sync.service.d/override.conf"

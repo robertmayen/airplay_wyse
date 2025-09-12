@@ -30,7 +30,7 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for:
 
 ```
 airplay_wyse/
-├── bin/            # Core scripts (reconcile, update, converge, health, install-airplay2, test-airplay2, validate-setup)
+├── bin/            # Core scripts (reconcile, update, converge, health, test-airplay2, diag, alsa-probe)
 ├── cfg/            # Configuration templates
 ├── systemd/        # Service definitions and overrides (vendor nqptp unit used)
 ├── scripts/        # Privilege wrapper
