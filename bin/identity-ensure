@@ -54,23 +54,35 @@ read_conf_value() {
 }
 
 set_conf_value() {
-  local key="$1" val="$2"
-  if grep -qiE "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null; then
-    sed -i -E "s|(^[[:space:]]*$key[[:space:]]*=[[:space:]]*").*(";)|\\1\"$val\"\\2|I" "$CONF"
-  else
-    # Append in appropriate section: general for name/hardware_address
-    if [[ "$key" == "name" || "$key" == "hardware_address" || "$key" == "interface" ]]; then
-      awk -v k="$key" -v v="$val" '
-        BEGIN{done=0}
-        /^general[[:space:]]*=\s*\{/ {print; insec=1; next}
-        insec && /^\}/ && done==0 {print "  "k" = \""v"\";"; print; insec=0; done=1; next}
-        {print}
-        END{if(done==0){print "general = {"; print "  "k" = \""v"\";"; print "};"}}
-      ' "$CONF" >"$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+    local key="$1" val="$2"
+    if grep -qiE "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null; then
+        sed -i -E "s|(^[[:space:]]*$key[[:space:]]*=[[:space:]]*\").*(\"[[:space:]]*;)|\\1$val\\2|I" "$CONF"
     else
-      echo "$key = \"$val\";" >>"$CONF"
+        # Append in appropriate section: general for name/hardware_address
+        if [[ "$key" == "name" || "$key" == "hardware_address" || "$key" == "interface" ]]; then
+            awk -v k="$key" -v v="$val" '
+                BEGIN { done=0 }
+                /^general[[:space:]]*=[[:space:]]*\{/ { print; insec=1; next }
+                insec && /^\}/ && done==0 { 
+                    print "    " k " = \"" v "\";"
+                    print
+                    insec=0
+                    done=1
+                    next
+                }
+                { print }
+                END {
+                    if (done==0) {
+                        print "general = {"
+                        print "    " k " = \"" v "\";"
+                        print "};"
+                    }
+                }
+            ' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+        else
+            echo "$key = \"$val\";" >> "$CONF"
+        fi
     fi
-  fi
 }
 
 main() {
