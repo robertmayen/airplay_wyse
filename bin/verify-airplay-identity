@@ -3,7 +3,7 @@ set -euo pipefail
 
 # verify-airplay-identity: developer convenience script
 # - Dumps local _airplay._tcp and _raop._tcp TXT
-# - Fails if pk missing or deviceid is zero
+# - Fails if pk missing, AP2 deviceid is zero, or _raop instance prefix is zero
 # - Additionally, when an identity reset was detected (instance.json mtime changed),
 #   asserts that the current pk differs from the previously cached pk.
 # - Prints one-line summary: <host> pk=<first8> deviceid=<MAC> iface=<iface>
@@ -69,7 +69,7 @@ EOF
 }
 
 main() {
-  local h iface a_txt r_txt pk deviceid rc=0
+  local h iface a_txt r_txt pk deviceid raop_prefix rc=0
   h="$(host_short)"
   iface="$(find_iface || true)"
   if ! command -v avahi-browse >/dev/null 2>&1; then
@@ -80,6 +80,8 @@ main() {
   r_txt=$(extract_for_host _raop._tcp "$h" | tr -d '\r')
   pk=$(echo "$a_txt" | grep -Eo 'pk=[0-9a-f]+' | head -n1 | cut -d= -f2 || true)
   deviceid=$( (echo "$a_txt"; echo "$r_txt") | grep -Eio 'deviceid=[0-9a-f:]{17}' | head -n1 | cut -d= -f2 || true)
+  # Extract RAOP instance 12-hex prefix: lines look like "= ... 001122334455@Name _raop._tcp ..."
+  raop_prefix=$( (echo "$r_txt"; avahi_dump _raop._tcp) | awk 'tolower($0) ~ /_raop\._tcp/ { for(i=1;i<=NF;i++) if ($i ~ /@/) { split($i,a,"@"); print a[1]; exit } }' | tr -d '\r' | head -n1)
 
   if [[ -z "${pk:-}" ]]; then
     echo "ERROR: pk missing in _airplay._tcp TXT for host '$h'" >&2
@@ -87,6 +89,10 @@ main() {
   fi
   if [[ -z "${deviceid:-}" || "$deviceid" =~ ^00:00:00:00:00:00$ ]]; then
     echo "ERROR: deviceid is zero or missing for host '$h'" >&2
+    rc=1
+  fi
+  if [[ -n "${raop_prefix:-}" && "$raop_prefix" =~ ^0{12}$ ]]; then
+    echo "ERROR: _raop instance prefix is zero (unselectable endpoint) for host '$h'" >&2
     rc=1
   fi
 
@@ -107,7 +113,11 @@ main() {
 
   local pkshort
   pkshort="${pk:0:8}"
-  echo "${h} pk=${pkshort} deviceid=${deviceid} iface=${iface:-unknown}"
+  if [[ $rc -eq 0 ]]; then
+    echo "${h} iface=${iface:-unknown} deviceid=${deviceid} pk=${pkshort} status=OK"
+  else
+    echo "${h} iface=${iface:-unknown} deviceid=${deviceid:-unknown} pk=${pkshort:-unknown} status=FAIL"
+  fi
   exit $rc
 }
 

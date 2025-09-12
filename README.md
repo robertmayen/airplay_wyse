@@ -58,6 +58,19 @@ Optional inventory hints
 - `systemd/airplay-wyse-identity.service` runs before shairport-sync to ensure unique identity and sane defaults even if you didn’t run apply.
   - The `shairport-sync` unit has a hard dependency (`Requires=airplay-wyse-identity.service`) and ordering (`After=`) so Shairport only starts if identity succeeds.
   - The identity oneshot also `Wants=` and runs `After=network-online.target` to avoid races with NIC bring-up and mDNS advertising.
+
+## Post‑Fix Runbook (Two Clones)
+
+- Refresh units and restart (one time per host):
+  - `sudo ./bin/install-units`
+- Recreate unique identity after cloning (if needed):
+  - `sudo /opt/airplay_wyse/bin/identity-ensure --force && sudo systemctl restart shairport-sync`
+- Verify systemd dependencies:
+  - `systemctl cat shairport-sync | grep -E "Requires=|After="` → shows `Requires=airplay-wyse-identity.service` and `After=airplay-wyse-identity.service`
+- Verify identity and mDNS on each host:
+  - `./bin/test-airplay2 --mdns` → should print `iface=… deviceid=XX:… pk=XXXXXXXX status=OK`
+  - Compare `pk` between hosts → must differ
+  - Ensure `deviceid` is non‑zero and `_raop._tcp` instance prefix is non‑zero
 - No periodic root timers, no on-device GitOps, no custom Avahi config unless you explicitly add one.
 
 ## Tips

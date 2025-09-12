@@ -3,7 +3,11 @@ set -euo pipefail
 
 # Ensure unique AirPlay 2 identity and sane defaults before shairport starts.
 # - Resets copied AP2 state on first-run or fingerprint change
-# - Ensures hardware_address is set (real or synthetic) to avoid RAOP collisions
+# - Ensures AirPlay 2 device identity is non-zero and per-host by setting
+#   general.airplay_device_id from the NIC MAC (or a stable synthetic fallback).
+#   See: Shairport-Sync docs on general.airplay_device_id; controllers use TXT `pk` for AP2 identity (OpenAirplay).
+#   RAOP instance names derive from a MAC-like prefix; all-zeros correlates with unselectable endpoints
+#   (OpenAirplay service_discovery; Shairport issue #1657).
 # - Ensures a unique default name (Wyse DAC-<MACSUFFIX>) if name is generic
 # - Sets interface coherently and validates non-zero deviceid
 
@@ -91,6 +95,49 @@ set_conf_value() {
     fi
 }
 
+# Read numeric/libconfig value (no quotes), e.g. airplay_device_id = 0xAABBCCDDEEFFL;
+read_conf_numeric() {
+  local key="$1"
+  awk -v k="$key" 'BEGIN{IGNORECASE=1} $0 ~ "^[[:space:]]*"k"[[:space:]]*=" {
+      match($0, /=[[:space:]]*[^;]+;/);
+      if (RSTART>0) {
+        v=substr($0, RSTART+1, RLENGTH-2);
+        gsub(/^[ \t]+|[ \t]+$/, "", v);
+        print v; exit
+      }
+    }' "$CONF" 2>/dev/null || true
+}
+
+# Write raw (unquoted) value, e.g. airplay_device_id = 0xAABB...L;
+set_conf_value_raw() {
+  local key="$1" val="$2"
+  if grep -qiE "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null; then
+    # Replace any existing scalar up to the semicolon
+    sed -i -E "s|(^[[:space:]]*$key[[:space:]]*=[[:space:]]*)[^;]+;|\\1$val;|I" "$CONF"
+  else
+    # Insert into general section if known key
+    awk -v k="$key" -v v="$val" '
+      BEGIN { done=0 }
+      /^general[[:space:]]*=[[:space:]]*\{/ { print; insec=1; next }
+      insec && /^\}/ && done==0 {
+          print "    " k " = " v ";"
+          print
+          insec=0
+          done=1
+          next
+      }
+      { print }
+      END {
+        if (done==0) {
+          print "general = {"
+          print "    " k " = " v ";"
+          print "};"
+        }
+      }
+    ' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+  fi
+}
+
 normalize_mac() {
   echo "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -99,6 +146,22 @@ mac_is_zero() {
   local m
   m="$(normalize_mac "$1")"
   [[ "$m" =~ ^00:00:00:00:00:00$ ]]
+}
+
+airplay_device_id_from_mac() {
+  # Convert aa:bb:cc:dd:ee:ff to 0xAABBCCDDEEFFL (libconfig integer)
+  local mac_hex
+  mac_hex=$(echo "$1" | tr '[:lower:]' '[:upper:]' | tr -d ':')
+  printf '0x%sL\n' "$mac_hex"
+}
+
+airplay_id_is_zero() {
+  # True if value parses to zero-like (0, 0x0L, 0x000...L)
+  local v="$1" up
+  up=$(echo "$v" | tr '[:lower:]' '[:upper:]')
+  up=${up%%;}
+  up=${up// /}
+  [[ "$up" =~ ^0x0+L$ || "$up" == "0" ]] && return 0 || return 1
 }
 
 choose_primary_iface() {
@@ -190,16 +253,19 @@ main() {
     log "using synthetic deviceid $mac (no real MAC available)"
   fi
 
-  # Ensure config has a hardware_address; avoid all-zero RAOP ids
-  cur_hwaddr=$(read_conf_value hardware_address || true)
-  target_mac=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
-  needs_update=0
-  if [[ -z "${cur_hwaddr:-}" ]]; then needs_update=1; fi
-  if mac_is_zero "${cur_hwaddr:-00:00:00:00:00:00}"; then needs_update=1; fi
-  if [[ "${cur_hwaddr:-}" != "$target_mac" ]]; then needs_update=1; fi
-  if [[ $needs_update -eq 1 ]]; then
-    log "setting hardware_address to $target_mac"
-    set_conf_value hardware_address "$target_mac"
+  # Ensure AirPlay 2 device id is present and non-zero. We derive it from the
+  # chosen MAC per Shairport-Sync guidance: general.airplay_device_id is a 48-bit
+  # identifier used for AP2; controllers use `_airplay._tcp` TXT `deviceid` and
+  # `pk` for identity (see OpenAirplay reverse docs).
+  # References:
+  # - https://github.com/openairplay/openairplay (service_discovery notes)
+  # - https://github.com/mikebrady/shairport-sync/issues/1657 (RAOP/MAC notes)
+  local ap2_id cur_ap2_id
+  ap2_id="$(airplay_device_id_from_mac "$mac")"
+  cur_ap2_id=$(read_conf_numeric airplay_device_id || true)
+  if [[ -z "${cur_ap2_id:-}" ]] || airplay_id_is_zero "${cur_ap2_id:-0}"; then
+    log "setting airplay_device_id to $ap2_id"
+    set_conf_value_raw airplay_device_id "$ap2_id"
   fi
 
   # Ensure a unique default name if name missing or generic
@@ -219,11 +285,11 @@ main() {
     maybe_reset_identity "${mac:-}"
   fi
 
-  # Lint: ensure non-zero deviceid
-  local post_mac
-  post_mac=$(read_conf_value hardware_address || true)
-  if [[ -z "${post_mac:-}" || "$post_mac" =~ ^0{2}:0{2}:0{2}:0{2}:0{2}:0{2}$ ]]; then
-    log "hardware_address is empty or zero in config"
+  # Lint: ensure non-zero AirPlay 2 deviceid present in config
+  local post_ap2
+  post_ap2=$(read_conf_numeric airplay_device_id || true)
+  if [[ -z "${post_ap2:-}" ]] || airplay_id_is_zero "${post_ap2:-0}"; then
+    log "airplay_device_id missing or zero in config"
     exit 1
   fi
 }

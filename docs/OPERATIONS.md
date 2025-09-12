@@ -40,9 +40,9 @@ If `AVAHI_IFACE` is set and `HW_ADDR` is not, the hardware address is derived fr
 
 Identity management
 - Identity self-heals automatically: a one-shot unit (`airplay-wyse-identity.service`) runs before `shairport-sync` (and after the network is online) to ensure:
-  - A non-zero device identity: sets `hardware_address` from the primary LAN interface. If no real MAC is readable, it synthesizes a stable locally-administered MAC from `/etc/machine-id` (sets LAA bit, clears multicast) to avoid the known all-zero RAOP failure.
+  - A non-zero AirPlay 2 device identity: sets `general.airplay_device_id` from the primary NIC MAC (format `0xAABBCCDDEEFFL`). If no real MAC is readable, it synthesizes a stable locally-administered MAC from `/etc/machine-id` (sets LAA bit, clears multicast) and derives the AP2 ID from it.
   - A unique default name (Wyse DAC-<MACSUFFIX>) if the name is generic or missing.
-  - Cloned images are reset safely: on first-run or when the host fingerprint changes, it purges Shairport’s AP2 state so a fresh keypair is generated on next start.
+  - Cloned images are reset safely: on first-run or when the host fingerprint changes, it purges Shairport’s AP2 state so a fresh keypair is generated on next start. TXT `pk` changes accordingly.
   - Fingerprint includes `machine-id`, hostname and MAC; state recorded at `/var/lib/airplay_wyse/instance.json`.
 
 ## Cloning Checklist
@@ -59,8 +59,13 @@ When cloning images across multiple hosts, ensure identity is unique and RAOP do
   - `./bin/test-airplay2 --mdns` includes the same checks.
 
 Notes
-- The identity step writes `interface = "...";` and `hardware_address = "...";` into `/etc/shairport-sync.conf` to pin mDNS advertisement to the chosen NIC and avoid zero-MAC RAOP collisions.
+- The identity step writes `interface = "...";` and `airplay_device_id = 0x...L;` into `/etc/shairport-sync.conf` to bind mDNS to the chosen NIC and avoid zero IDs. Classic RAOP remains available; its instance prefix derives from a MAC-like value and must not be all zeros.
 - The chosen interface is stable and deterministic: explicit `AIRPLAY_WYSE_IFACE` → default route NIC → first UP with carrier → first UP non-loopback.
+
+Why pk uniqueness matters
+- Controllers use AirPlay‑2 TXT `pk` as the stable device identity (see OpenAirplay service_discovery notes). If two hosts share the same `pk`, only one will be usable. This repo enforces uniqueness by purging the Shairport‑Sync AP2 state on clone or fingerprint change so a fresh keypair and `pk` are generated.
+What `airplay_device_id` does
+- Shairport‑Sync uses `general.airplay_device_id` (48‑bit integer) as the AirPlay‑2 device ID, typically derived from the NIC MAC. We compute and write it explicitly to avoid zero IDs and make boot ordering deterministic.
 
 Interface override and timing
 - The identity step chooses the primary interface deterministically: env override `AIRPLAY_WYSE_IFACE` (or `/etc/default/airplay_wyse`) → default route NIC → first UP with carrier → first UP non‑loopback. It waits up to 10s for an interface to appear before synthesizing a fallback device identity.
