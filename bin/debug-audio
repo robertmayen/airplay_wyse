@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# debug-audio: Extensive diagnostic for chopped/stuttering audio.
+# - Checks Shairport build features (soxr), service status, config, and logs
+# - Verifies AP2/RAOP identity via verify-airplay-identity
+# - Inspects ALSA devices and mixer controls; tests opening selected device at 44.1k via plug
+# - Inspects network interface used and basic Wi‑Fi power-save status if applicable
+# - Summarises likely causes with remediation hints
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+say() { echo "$(ts) [debug-audio] $*"; }
+warn() { echo "$(ts) [debug-audio] WARN: $*"; }
+err() { echo "$(ts) [debug-audio] ERROR: $*"; }
+
+CONF="/etc/shairport-sync.conf"
+DEFAULTS="/etc/default/airplay_wyse"
+
+read_conf_kv() {
+  local key="$1"
+  awk -v k="$key" 'BEGIN{IGNORECASE=1} $0 ~ "^[[:space:]]*"k"[[:space:]]*=" {match($0, /=[[:space:]]*"[^"]*"/); if (RSTART>0) {v=substr($0, RSTART+2, RLENGTH-2); gsub(/^[ \t\"]+|[ \t\"]+$/, "", v); print v; exit}}' "$CONF" 2>/dev/null || true
+}
+
+iface_from_conf() {
+  read_conf_kv interface || true
+}
+
+device_from_conf() {
+  awk 'BEGIN{IGNORECASE=1}
+    /^alsa[[:space:]]*=/{insec=1}
+    insec && /output_device[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
+    insec && /^};/ {insec=0}
+  ' "$CONF" 2>/dev/null || true
+}
+
+wifi_powersave() {
+  local i="$1"
+  command -v iw >/dev/null 2>&1 || { echo "unknown"; return 0; }
+  iw dev "$i" get power_save 2>/dev/null | awk '{print $NF}' || echo unknown
+}
+
+cpu_for_proc() {
+  local p="$1"
+  ps -o %cpu= -p "$p" 2>/dev/null | awk '{print $1+0}' || echo 0
+}
+
+main() {
+  say "Collecting diagnostics..."
+  local ver build soxr
+  if command -v shairport-sync >/dev/null 2>&1; then
+    ver=$(shairport-sync -V 2>&1 | head -1)
+    soxr=$(shairport-sync -V 2>&1 | grep -q soxr && echo yes || echo no)
+    say "shairport-sync: $ver (soxr=$soxr)"
+  else
+    err "shairport-sync not found"
+  fi
+
+  say "Service status:"
+  systemctl is-active --quiet shairport-sync && echo "active" || echo "inactive"
+  systemctl is-enabled --quiet shairport-sync && echo "enabled" || echo "disabled"
+
+  say "Config excerpts:"
+  echo "[general] interface=$(iface_from_conf || echo unset) statistics=$(awk 'BEGIN{IGNORECASE=1}/statistics/{match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}' "$CONF" 2>/dev/null || echo unset)"
+  echo "[alsa] device=$(device_from_conf || echo unset)"
+
+  say "AP2/RAOP identity check:"
+  if [[ -x "$(dirname "$0")/verify-airplay-identity" ]]; then
+    if ! "$(dirname "$0")/verify-airplay-identity"; then
+      warn "Identity check failed; see above"
+    fi
+  else
+    warn "verify-airplay-identity not executable"
+  fi
+
+  say "Recent Shairport logs (underruns/overruns/errors):"
+  journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
+    rg -i "underrun|overrun|xruns|buffer|latency|can not be set|error" -n || echo "(no notable messages)"
+
+  say "ALSA devices:"
+  aplay -l 2>/dev/null || true
+  local dev
+  dev=$(device_from_conf || true)
+  if [[ -n "$dev" ]]; then
+    say "Testing if device accepts 44.1k via ALSA plug (non-intrusive):"
+    timeout 5 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t null /dev/zero -q 2>/dev/null && \
+      echo "OK: $dev opens at 44.1k (plug likely resampling)" || \
+      warn "$dev did not open at 44.1k"
+  fi
+
+  local iface
+  iface=$(iface_from_conf || true)
+  if [[ -z "$iface" ]]; then
+    iface=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')
+  fi
+  if [[ -n "$iface" ]]; then
+    say "Interface: $iface ($(ip -br link show "$iface" 2>/dev/null | awk '{print $3}'))"
+    if iw dev "$iface" info >/dev/null 2>&1; then
+      say "Wi‑Fi powersave: $(wifi_powersave "$iface")"
+    fi
+  fi
+
+  if pidof shairport-sync >/dev/null 2>&1; then
+    say "Shairport CPU% (snapshot): $(cpu_for_proc $(pidof shairport-sync))"
+  fi
+
+  say "Done. Likely causes and hints:"
+  echo "- If logs show underruns/overruns: increase Wi‑Fi stability (reduce powersave), prefer Ethernet, or move AP closer."
+  echo "- If ALSA device can't open at 44.1k and you're not using a USB DAC, keep using plughw:<card>,<dev>."
+  echo "- If CPU% is high and soxr is used, consider reducing other load; Wyse 5070 usually handles it fine."
+}
+
+main "$@"
+

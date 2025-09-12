@@ -12,8 +12,8 @@ STATE_DIR="/var/lib/airplay_wyse"
 IDENTITY_FILE="$STATE_DIR/instance.json"
 
 render_shairport_conf() {
-  # Args: <template> <target> <name> <device> <mixer> <iface> <hwaddr> <output_rate>
-  local tmpl="$1" tgt="$2" name="$3" device="$4" mixer="$5" iface="$6" hwaddr="$7" rate="${8:-}"
+  # Args: <template> <target> <name> <device> <mixer> <iface> <hwaddr> [output_rate] [statistics]
+  local tmpl="$1" tgt="$2" name="$3" device="$4" mixer="$5" iface="$6" hwaddr="$7" rate="${8:-}" stats="${9:-}"
   [[ -f "$tmpl" ]] || { echo "[lib] missing template: $tmpl" >&2; return 1; }
 
   local tmp
@@ -25,6 +25,7 @@ render_shairport_conf() {
     -e "s/{{AVAHI_IFACE}}/${iface//\//\/}/g" \
     -e "s/{{HW_ADDR}}/${hwaddr//\//\/}/g" \
     -e "s/{{ALSA_OUTPUT_RATE}}/${rate//\//\/}/g" \
+    -e "s/{{STATISTICS}}/${stats//\//\/}/g" \
     "$tmpl" > "$tmp"
   # Drop optional fields if unset
   if [[ -z "$mixer" ]]; then
@@ -38,6 +39,9 @@ render_shairport_conf() {
   fi
   if [[ -z "$hwaddr" ]]; then
     grep -v '^[[:space:]]*hardware_address[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+  fi
+  if [[ -z "$stats" ]]; then
+    grep -v '^[[:space:]]*statistics[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
   fi
   install -m 0644 "$tmp" "$tgt"
   rm -f "$tmp"

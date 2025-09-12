@@ -71,6 +71,14 @@ Optional inventory hints
   - `./bin/test-airplay2 --mdns` → should print `iface=… deviceid=XX:… pk=XXXXXXXX status=OK`
   - Compare `pk` between hosts → must differ
   - Ensure `deviceid` is non‑zero and `_raop._tcp` instance prefix is non‑zero
+
+## Debugging Choppy Audio
+
+- Enable Shairport runtime statistics and repo diagnostics:
+  - `echo AIRPLAY_WYSE_DEBUG=1 | sudo tee -a /etc/default/airplay_wyse`
+  - `sudo ./bin/apply`
+  - `./bin/debug-audio` (collects build, service status, identity, ALSA tests, Wi‑Fi powersave, and searches logs for underruns/overruns)
+  - `journalctl -u shairport-sync -n 200 | rg -i 'underrun|overrun|xruns|buffer|latency'`
 - No periodic root timers, no on-device GitOps, no custom Avahi config unless you explicitly add one.
 
 ## Tips

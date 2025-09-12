@@ -117,3 +117,9 @@ Note on NQPTP
 - `systemctl is-active nqptp` returns `active`.
 - `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp` (or `_raop._tcp`).
 - `bin/alsa-probe` returns an ALSA device string and `aplay -D <device>` can open it (busy tolerated).
+- Debugging
+- To enable extra runtime statistics in Shairport logs and run extensive checks, set:
+  - `sudo sh -c 'echo AIRPLAY_WYSE_DEBUG=1 >> /etc/default/airplay_wyse'`
+  - Re-render config: `sudo ./bin/apply`
+  - Check: `journalctl -u shairport-sync -n 200 | rg -i "underrun|overrun|xruns|buffer|latency"`
+  - Use `./bin/debug-audio` to run a comprehensive diagnostic: build features, service status, identity, ALSA device open tests, Wi‑Fi powersave status, and a summary of likely causes with hints.
