@@ -1,0 +1,13 @@
+[Unit]
+Description=AirPlay Wyse Identity Ensure
+Documentation=https://github.com/robertmayen/airplay_wyse
+Before=shairport-sync.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/airplay_wyse/bin/identity-ensure
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+

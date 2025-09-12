@@ -39,7 +39,7 @@ You can also set environment variables when running `setup`/`apply`:
 If `AVAHI_IFACE` is set and `HW_ADDR` is not, the hardware address is derived from the interface.
 
 Identity management
-- The first time a device runs `setup`/`apply`, or if the image was cloned to new hardware, the scripts detect a fingerprint change (machine-id + MAC) and clear any pre-populated AirPlay 2 identity state. This ensures each device generates unique pairing keys. State is tracked in `/var/lib/airplay_wyse/instance.json`.
+- Identity self-heals automatically: a one-shot unit (`airplay-wyse-identity.service`) runs before `shairport-sync` to ensure a unique hardware_address, a unique default name, and to reset copied AirPlay 2 identity on first-run or fingerprint change. Fingerprint is `(machine-id|MAC)`, state at `/var/lib/airplay_wyse/instance.json`.
 
 ## Optional Host Inventory
 For environments with multiple similar hosts, `bin/alsa-probe` continues to honor optional hints at `inventory/hosts/<short-hostname>.yml`:

@@ -12,7 +12,7 @@ Components
 - `bin/apply` (root): reapplies config when name/ALSA settings change and restarts shairport.
 - `bin/alsa-probe`: resolves a suitable `hw:<card>,<device>` string with USB preference.
 - Optional inventory hints in `inventory/hosts/<short-hostname>.yml` for ALSA.
- - Identity management in `bin/lib.sh`: derives a unique default name from MAC and self-heals cloned images by resetting AirPlay 2 identity on first-run/fingerprint change.
+ - Identity management in `bin/lib.sh`: derives a unique default name from MAC and self-heals cloned images by resetting AirPlay 2 identity on first-run/fingerprint change. A one-shot unit (`airplay-wyse-identity.service`) enforces this before `shairport-sync` starts.
 
 Security
 - Shairport runs as its vendor user with a hardened override:

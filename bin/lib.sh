@@ -94,8 +94,8 @@ maybe_reset_identity() {
   if command -v jq >/dev/null 2>&1; then
     current_fp=$(jq -r '(.machine_id+"|"+.mac) // empty' "$IDENTITY_FILE" 2>/dev/null || true)
   else
-    # Fallback: do not reset on mismatch if jq is unavailable; preserve existing identity
-    current_fp="$fp"
+    # Fallback: parse JSON with awk/sed (best-effort)
+    current_fp=$(awk -F'"' '/"machine_id"/{mid=$4} /"mac"/{mac=$4} END{if(mid!="" && mac!="") print mid"|"mac}' "$IDENTITY_FILE" 2>/dev/null || true)
   fi
   if [[ "$current_fp" != "$fp" && -n "$fp" ]]; then
     echo "[lib] identity fingerprint changed; resetting shairport identity" >&2

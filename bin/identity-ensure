@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Ensure unique AirPlay 2 identity and sane defaults before shairport starts.
+# - Resets copied AP2 state on first-run or fingerprint change
+# - Ensures hardware_address is set from active NIC to avoid RAOP collisions
+# - Ensures a unique default name (Wyse DAC-<MACSUFFIX>) if name is generic
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+LIB_SH="$REPO_DIR/bin/lib.sh"
+CONF="/etc/shairport-sync.conf"
+
+# shellcheck disable=SC1091
+[[ -f "$LIB_SH" ]] && source "$LIB_SH" || { echo "[identity] missing lib: $LIB_SH" >&2; exit 0; }
+
+log() { echo "$(ts) [identity] $*"; }
+
+read_conf_value() {
+  # naive reader for key in top-level sections: key = "value";
+  local key="$1"
+  awk -v k="$key" 'BEGIN{IGNORECASE=1} $0 ~ k"[[:space:]]*=" {match($0, /=[[:space:]]*"[^"]*"/); if (RSTART>0) {v=substr($0, RSTART+2, RLENGTH-2); gsub(/^[ \t\"]+|[ \t\"]+$/, "", v); print v; exit}}' "$CONF" 2>/dev/null || true
+}
+
+set_conf_value() {
+  local key="$1" val="$2"
+  if grep -qiE "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null; then
+    sed -i -E "s|(^[[:space:]]*$key[[:space:]]*=[[:space:]]*").*(";)|\\1\"$val\"\\2|I" "$CONF"
+  else
+    # Append in appropriate section: general for name/hardware_address
+    if [[ "$key" == "name" || "$key" == "hardware_address" || "$key" == "interface" ]]; then
+      awk -v k="$key" -v v="$val" '
+        BEGIN{done=0}
+        /^general[[:space:]]*=\s*\{/ {print; insec=1; next}
+        insec && /^\}/ && done==0 {print "  "k" = \""v"\";"; print; insec=0; done=1; next}
+        {print}
+        END{if(done==0){print "general = {"; print "  "k" = \""v"\";"; print "};"}}
+      ' "$CONF" >"$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+    else
+      echo "$key = \"$val\";" >>"$CONF"
+    fi
+  fi
+}
+
+main() {
+  # Derive active interface/MAC
+  local iface mac name cur_name cur_hwaddr
+  iface="${AVAHI_IFACE:-$(primary_iface || true)}"
+  mac="${HW_ADDR:-$(derive_hwaddr_from_iface "$iface" || true)}"
+  cur_name=$(read_conf_value name || true)
+  cur_hwaddr=$(read_conf_value hardware_address || true)
+
+  # Ensure config has a hardware_address; avoid all-zero RAOP ids
+  if [[ -z "${cur_hwaddr:-}" || "$cur_hwaddr" =~ ^0{2}:0{2}:0{2}:0{2}:0{2}:0{2}$ ]]; then
+    if [[ -n "${mac:-}" ]]; then
+      log "setting hardware_address to $mac"
+      set_conf_value hardware_address "$mac"
+    fi
+  fi
+
+  # Ensure a unique default name if name missing or generic
+  if [[ -z "${cur_name:-}" || "$cur_name" =~ ^Wyse[[:space:]]+DAC$ ]]; then
+    name="$(default_airplay_name "${mac:-}")"
+    log "setting default name to $name"
+    set_conf_value name "$name"
+  fi
+
+  # Reset identity on first-run or when the fingerprint changed
+  maybe_reset_identity "${mac:-}"
+}
+
+main "$@"
+

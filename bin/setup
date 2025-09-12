@@ -15,6 +15,8 @@ TARGET_CONF="/etc/shairport-sync.conf"
 SH_OVERRIDE_SRC="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
 SH_OVERRIDE_DIR="/etc/systemd/system/shairport-sync.service.d"
 SH_OVERRIDE_DEST="$SH_OVERRIDE_DIR/override.conf"
+IDENTITY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-identity.service"
+IDENTITY_UNIT_DEST="/etc/systemd/system/airplay-wyse-identity.service"
 LIB_SH="$REPO_DIR/bin/lib.sh"
 
 log() { echo "$(ts) [setup] $*"; }
@@ -131,6 +133,13 @@ install_override() {
   fi
 }
 
+install_identity_unit() {
+  if [[ -f "$IDENTITY_UNIT_SRC" ]]; then
+    install -m 0644 "$IDENTITY_UNIT_SRC" "$IDENTITY_UNIT_DEST"
+    systemctl daemon-reload
+  fi
+}
+
 main() {
   require_root
   command -v systemctl >/dev/null 2>&1 || die "systemd is required"
@@ -161,6 +170,9 @@ main() {
   log "installing shairport-sync override (hardened + nqptp ordering)"
   install_override
   ensure_execstart_for_local_build
+
+  log "installing identity ensure unit"
+  install_identity_unit
 
   # Resolve defaults for iface/hwaddr and default, unique name
   local primary_if mac
