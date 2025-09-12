@@ -194,10 +194,23 @@ render_template() {
   local tmp
   tmp=$(mktemp -p "$TMPDIR")
   cp "$src" "$tmp"
-  sed -i "s/{{AIRPLAY_NAME}}/${AIRPLAY_NAME//\//\/}/g" "$tmp"
-  sed -i "s/{{ALSA_DEVICE}}/${ALSA_DEVICE//\//\/}/g" "$tmp"
-  sed -i "s/{{AVAHI_IFACE}}/${AVAHI_IFACE//\//\/}/g" "$tmp"
-  sed -i "s/{{ALSA_MIXER}}/${ALSA_MIXER//\//\/}/g" "$tmp"
+  # Use perl for robust placeholder replacement (handles braces and special chars)
+  AIRPLAY_NAME="$AIRPLAY_NAME" \
+  ALSA_DEVICE="$ALSA_DEVICE" \
+  AVAHI_IFACE="$AVAHI_IFACE" \
+  ALSA_MIXER="$ALSA_MIXER" \
+  perl -0777 -pe '
+    s/\{\{AIRPLAY_NAME\}\}/$ENV{AIRPLAY_NAME}//g;
+    s/\{\{ALSA_DEVICE\}\}/$ENV{ALSA_DEVICE}//g;
+    s/\{\{AVAHI_IFACE\}\}/$ENV{AVAHI_IFACE}//g;
+    s/\{\{ALSA_MIXER\}\}/$ENV{ALSA_MIXER}//g;
+  ' -i "$tmp"
+  # If placeholders remain, do not clobber destination; keep tmp for inspection
+  if grep -q '{{' "$tmp" 2>/dev/null; then
+    log "WARN: template placeholders unresolved in $src; skipping install"
+    rm -f "$tmp"
+    return 0
+  fi
   # Write rendered file to a temp path owned by airplay; a root copy, if needed, must be enqueued externally.
   install -m 0644 "$tmp" "$dst" 2>/dev/null || true
   rm -f "$tmp"
