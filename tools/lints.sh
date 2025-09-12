@@ -10,8 +10,8 @@ PASS_COUNT=0
 FAIL_COUNT=0
 
 log() { echo "[lints] $*" >&2; }
-pass() { echo "✅ $1"; ((PASS_COUNT++)); }
-fail() { echo "❌ FAIL: $1"; ((FAIL_COUNT++)); }
+pass() { echo "✅ $1"; PASS_COUNT=$((PASS_COUNT+1)); }
+fail() { echo "❌ FAIL: $1"; FAIL_COUNT=$((FAIL_COUNT+1)); }
 
 check() {
   local desc="$1" cmd="$2"
