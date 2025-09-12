@@ -12,10 +12,58 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Optional inventory
 host_short() { hostname -s 2>/dev/null || hostname; }
 INV="$REPO_DIR/inventory/hosts/$(host_short).yml"
+
+# Minimal YAML reader supporting either:
+#  - flat keys:   "alsa.vendor_id: 0x08bb"
+#  - nested keys: "alsa:\n  vendor_id: 0x08bb"
+# It is intentionally simple and only handles the small subset we need.
 yaml_get() {
-  local key="$1"
+  local key="$1" val=""
   [[ -f "$INV" ]] || { echo ""; return 0; }
-  grep -E "^${key}:[[:space:]]" "$INV" | sed -E "s/^${key}:[[:space:]]*//" | tr -d '"'
+
+  # If requesting alsa.<field>, first try nested under an `alsa:` block
+  if [[ "$key" == alsa.* ]]; then
+    local subkey="${key#alsa.}"
+    val=$(awk -v want="$subkey" '
+      function strip(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+      function unq(s) {
+        # remove surrounding double quotes
+        gsub(/^\"|\"$/, "", s)
+        # remove surrounding single quotes (build pattern to avoid quoting issues)
+        q = sprintf("%c", 39)
+        gsub("^" q "|" q "$", "", s)
+        return s
+      }
+      function unquote(s) { gsub(/^"|"$/, "", s); gsub(/^'[1m[0m'|'$/, "", s); return s }
+      BEGIN { insec=0; sec_indent=-1 }
+      {
+        line=$0
+        sub(/[ \t]*#.*/, "", line)           # remove comments
+        if (line ~ /^[ \t]*$/) next           # skip empty
+      }
+      # enter alsa: section and record its indent
+      match(line, /^([ \t]*)alsa:[ \t]*$/, m) {
+        insec=1; sec_indent=length(m[1]); next
+      }
+      {
+        if (insec) {
+          match(line, /^([ \t]*)/, mi)
+          indent=length(mi[1])
+          if (indent <= sec_indent) { insec=0 }
+        }
+      }
+      insec && match(line, /^[ \t]*([A-Za-z0-9_]+)[ \t]*:[ \t]*(.*)$/, kv) {
+        k=kv[1]; v=kv[2]
+        v=strip(v); v=unq(v)
+        if (tolower(k) == tolower(want)) { print v; exit }
+      }
+    ' "$INV" ) || true
+    if [[ -n "$val" ]]; then echo "$val"; return 0; fi
+  fi
+
+  # Fallback: flat key on a single line
+  val=$(grep -E "^${key}:[[:space:]]" "$INV" 2>/dev/null | sed -E "s/^${key}:[[:space:]]*//" | sed -E 's/[[:space:]]+#.*$//' | tr -d '"') || true
+  echo "${val}"
 }
 
 vid=$(yaml_get 'alsa.vendor_id' || true)

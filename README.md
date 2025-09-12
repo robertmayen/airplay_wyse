@@ -40,16 +40,25 @@ Updates
 
 ```
 airplay_wyse/
-├── bin/            # Core scripts (setup, apply, health, alsa-probe, diag, test-airplay2)
+├── bin/            # Core scripts (setup, apply, identity, alsa-probe, diag, test-airplay2)
 ├── cfg/            # Templates (minimal shairport-sync.conf)
-├── systemd/        # Service overrides (e.g., shairport-sync hardening + nqptp ordering)
-├── tests/          # Smoke test
+├── systemd/        # Service + hardened overrides
 ├── tools/          # Lints and helpers
-└── docs/           # Operations, architecture
+├── docs/           # Operations, architecture
+└── LICENSE         # MIT license
 ```
 
 Optional inventory hints
-- `bin/alsa-probe` can use `inventory/hosts/<short-hostname>.yml` if you add it to the device.
+- `bin/alsa-probe` can use `inventory/hosts/<short-hostname>.yml` if you add it to the device. Nested YAML is supported, for example:
+  
+  ```yaml
+  alsa:
+    mixer: "PCM"        # optional
+    device_num: 0       # optional
+    vendor_id: "0x08bb" # optional (USB)
+    product_id: "0x2902"# optional (USB)
+    # device: "hw:1,0"  # optional explicit device override
+  ```
 
 ## How It Works (Simplified)
 
@@ -89,4 +98,4 @@ Optional inventory hints
 
 ## License
 
-MIT
+MIT — see `LICENSE` for details.
