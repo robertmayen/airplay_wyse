@@ -171,7 +171,7 @@ main() {
   while { [[ -z "${mac:-}" ]] || mac_is_zero "$mac"; } && [[ $tries -lt $NETWORK_WAIT_SECS ]]; do
     sleep 1; tries=$((tries+1)); mac="${HW_ADDR:-$(read_mac_from_iface "${iface:-}" || true)}"
   done
-  if [[ -z "${mac:-}" || mac_is_zero "$mac" ]]; then
+  if [[ -z "${mac:-}" ]] || mac_is_zero "$mac"; then
     mac="$(synthetic_mac_from_machine_id)"
     log "using synthetic deviceid $mac (no real MAC available)"
   fi
