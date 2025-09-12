@@ -178,9 +178,14 @@ main() {
 
   # Ensure config has a hardware_address; avoid all-zero RAOP ids
   cur_hwaddr=$(read_conf_value hardware_address || true)
-  if [[ -z "${cur_hwaddr:-}" || mac_is_zero "$cur_hwaddr" || "$cur_hwaddr" != "$(echo "$mac" | tr '[:upper:]' '[:lower:]')" ]]; then
-    log "setting hardware_address to $mac"
-    set_conf_value hardware_address "$(echo "$mac" | tr '[:upper:]' '[:lower:]')"
+  target_mac=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
+  needs_update=0
+  if [[ -z "${cur_hwaddr:-}" ]]; then needs_update=1; fi
+  if mac_is_zero "${cur_hwaddr:-00:00:00:00:00:00}"; then needs_update=1; fi
+  if [[ "${cur_hwaddr:-}" != "$target_mac" ]]; then needs_update=1; fi
+  if [[ $needs_update -eq 1 ]]; then
+    log "setting hardware_address to $target_mac"
+    set_conf_value hardware_address "$target_mac"
   fi
 
   # Ensure a unique default name if name missing or generic
