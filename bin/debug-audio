@@ -60,7 +60,17 @@ main() {
   systemctl is-enabled --quiet shairport-sync && echo "enabled" || echo "disabled"
 
   say "Config excerpts:"
-  echo "[general] interface=$(iface_from_conf || echo unset) statistics=$(awk 'BEGIN{IGNORECASE=1}/statistics/{match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}' "$CONF" 2>/dev/null || echo unset)"
+  diag_stats=$(awk 'BEGIN{IGNORECASE=1}
+    /^diagnostics[[:space:]]*=/{insec=1}
+    insec && /statistics[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
+    insec && /^};/ {insec=0}
+  ' "$CONF" 2>/dev/null || true)
+  gen_stats=$(awk 'BEGIN{IGNORECASE=1}
+    /^general[[:space:]]*=/{insec=1}
+    insec && /statistics[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
+    insec && /^};/ {insec=0}
+  ' "$CONF" 2>/dev/null || true)
+  echo "[general] interface=$(iface_from_conf || echo unset) diagnostics.statistics=${diag_stats:-unset} general.statistics=${gen_stats:-unset}"
   echo "[alsa] device=$(device_from_conf || echo unset)"
 
   say "AP2/RAOP identity check:"
@@ -72,19 +82,28 @@ main() {
     warn "verify-airplay-identity not executable"
   fi
 
-  say "Recent Shairport logs (underruns/overruns/errors):"
+say "Recent Shairport logs (underruns/overruns/errors):"
+if command -v rg >/dev/null 2>&1; then
   journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
     rg -i "underrun|overrun|xruns|buffer|latency|can not be set|error" -n || echo "(no notable messages)"
+else
+  journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
+    grep -Ei "underrun|overrun|xruns|buffer|latency|can not be set|error" || echo "(no notable messages)"
+fi
 
   say "ALSA devices:"
   aplay -l 2>/dev/null || true
   local dev
   dev=$(device_from_conf || true)
   if [[ -n "$dev" ]]; then
-    say "Testing if device accepts 44.1k via ALSA plug (non-intrusive):"
-    timeout 5 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t null /dev/zero -q 2>/dev/null && \
-      echo "OK: $dev opens at 44.1k (plug likely resampling)" || \
-      warn "$dev did not open at 44.1k"
+  say "Testing if device accepts 44.1k via ALSA plug (short 0dB sine):"
+  if command -v speaker-test >/dev/null 2>&1; then
+    timeout 3 speaker-test -D "$dev" -c 2 -r 44100 -t sine -l 1 >/dev/null 2>&1 && \
+      echo "OK: $dev opened at 44.1k" || warn "$dev did not open at 44.1k"
+  else
+    timeout 3 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q 2>/dev/null && \
+      echo "OK: $dev opened at 44.1k" || warn "$dev did not open at 44.1k"
+  fi
   fi
 
   local iface
@@ -110,4 +129,3 @@ main() {
 }
 
 main "$@"
-
