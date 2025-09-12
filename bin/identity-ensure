@@ -16,6 +16,37 @@ CONF="/etc/shairport-sync.conf"
 
 log() { echo "$(ts) [identity] $*"; }
 
+FORCE=0
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) FORCE=1 ;;
+      -h|--help)
+        cat <<EOF
+Usage: ./bin/identity-ensure [--force]
+Ensures unique AirPlay 2 identity and sane defaults.
+  --force   Reset identity unconditionally (clears /var/lib/shairport-sync)
+EOF
+        exit 0
+        ;;
+      *) log "unknown argument: $1"; exit 1 ;;
+    esac
+    shift || true
+  done
+}
+
+force_reset_identity() {
+  local mac="$1"
+  log "force-resetting shairport identity"
+  systemctl stop shairport-sync.service >/dev/null 2>&1 || true
+  rm -rf /var/lib/shairport-sync/* 2>/dev/null || true
+  ensure_state_dir
+  local machine_id
+  machine_id=$(cat /etc/machine-id 2>/dev/null || true)
+  printf '{"machine_id":"%s","mac":"%s","forced":"%s"}\n' "$machine_id" "$mac" "$(ts)" >"$IDENTITY_FILE"
+}
+
 read_conf_value() {
   # naive reader for key in top-level sections: key = "value";
   local key="$1"
@@ -43,6 +74,7 @@ set_conf_value() {
 }
 
 main() {
+  parse_args "$@"
   # Derive active interface/MAC
   local iface mac name cur_name cur_hwaddr
   iface="${AVAHI_IFACE:-$(primary_iface || true)}"
@@ -65,9 +97,12 @@ main() {
     set_conf_value name "$name"
   fi
 
-  # Reset identity on first-run or when the fingerprint changed
-  maybe_reset_identity "${mac:-}"
+  # Reset identity (forced or fingerprint-based)
+  if [[ $FORCE -eq 1 ]]; then
+    force_reset_identity "${mac:-}"
+  else
+    maybe_reset_identity "${mac:-}"
+  fi
 }
 
 main "$@"
-
