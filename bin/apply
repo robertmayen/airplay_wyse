@@ -27,7 +27,7 @@ EOF
 }
 
 render_conf() {
-  local name="$1" device="$2" mixer="$3" iface="$4"
+  local name="$1" device="$2" mixer="$3" iface="$4" hwaddr="$5"
   [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
 
   local tmp
@@ -37,6 +37,7 @@ render_conf() {
     -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
     -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
     -e "s/{{AVAHI_IFACE}}/${iface//\//\/}/g" \
+    -e "s/{{HW_ADDR}}/${hwaddr//\//\/}/g" \
     "$TEMPLATE_MIN" > "$tmp"
   if [[ -z "$mixer" ]]; then
     grep -v 'mixer_control_name' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
@@ -45,6 +46,10 @@ render_conf() {
     # Drop interface line if not provided
     grep -v '^[[:space:]]*interface[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
   fi
+  if [[ -z "$hwaddr" ]]; then
+    # Drop hardware_address line if not provided
+    grep -v '^[[:space:]]*hardware_address[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+  fi
   install -m 0644 "$tmp" "$TARGET_CONF"
   rm -f "$tmp"
 }
@@ -52,11 +57,12 @@ render_conf() {
 main() {
   require_root
 
-  local name device mixer iface
+  local name device mixer iface hwaddr
   name="${AIRPLAY_NAME:-}"
   device="${ALSA_DEVICE:-}"
   mixer="${ALSA_MIXER:-}"
   iface="${AVAHI_IFACE:-}"
+  hwaddr="${HW_ADDR:-}"
 
   # Parse flags
   while [[ $# -gt 0 ]]; do
@@ -80,9 +86,12 @@ main() {
       device="hw:0,0"
     fi
   fi
+  if [[ -z "$hwaddr" && -n "${iface:-}" ]]; then
+    hwaddr=$(cat "/sys/class/net/$iface/address" 2>/dev/null | head -n1 || true)
+  fi
 
-  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'})"
-  render_conf "$name" "$device" "${mixer:-}" "${iface:-}"
+  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'}${hwaddr:+, hwaddr='$hwaddr'})"
+  render_conf "$name" "$device" "${mixer:-}" "${iface:-}" "${hwaddr:-}"
 
   log "restarting shairport-sync"
   systemctl restart shairport-sync.service

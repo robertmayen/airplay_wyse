@@ -121,7 +121,7 @@ EOF
 }
 
 render_conf() {
-  local name="$1" device="$2" mixer="$3" iface="$4"
+  local name="$1" device="$2" mixer="$3" iface="$4" hwaddr="$5"
   [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
 
   # Render variables
@@ -132,6 +132,7 @@ render_conf() {
     -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
     -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
     -e "s/{{AVAHI_IFACE}}/${iface//\//\/}/g" \
+    -e "s/{{HW_ADDR}}/${hwaddr//\//\/}/g" \
     "$TEMPLATE_MIN" > "$tmp"
   # Drop optional mixer line if empty
   if [[ -z "$mixer" ]]; then
@@ -140,6 +141,10 @@ render_conf() {
   # Drop interface line if empty
   if [[ -z "$iface" ]]; then
     grep -v '^[[:space:]]*interface[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+  fi
+  # Drop hardware address line if empty
+  if [[ -z "$hwaddr" ]]; then
+    grep -v '^[[:space:]]*hardware_address[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
   fi
   install -m 0644 "$tmp" "$TARGET_CONF"
   rm -f "$tmp"
@@ -161,6 +166,7 @@ main() {
   name="${AIRPLAY_NAME:-Wyse DAC}"
   mixer="${ALSA_MIXER:-}"
   iface="${AVAHI_IFACE:-}"
+  local hwaddr="${HW_ADDR:-}"
 
   # Determine ALSA device: prefer explicit env, else alsa-probe, else hw:0,0
   if [[ -n "${ALSA_DEVICE:-}" ]]; then
@@ -180,8 +186,13 @@ main() {
   install_override
   ensure_execstart_for_local_build
 
-  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'})"
-  render_conf "$name" "$device" "${mixer:-}" "${iface:-}"
+  # Derive hardware address from iface if not explicitly provided
+  if [[ -z "$hwaddr" && -n "${iface:-}" ]]; then
+    hwaddr=$(cat "/sys/class/net/$iface/address" 2>/dev/null | head -n1 || true)
+  fi
+
+  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'}${hwaddr:+, hwaddr='$hwaddr'})"
+  render_conf "$name" "$device" "${mixer:-}" "${iface:-}" "${hwaddr:-}"
 
   log "enabling and starting services"
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"
