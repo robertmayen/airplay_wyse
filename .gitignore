@@ -1,0 +1,36 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Logs / temp / backups
+*.log
+*.tmp
+*.bak
+
+# Virtual envs / direnv
+.env
+.env.local
+.envrc
+venv/
+.direnv/
+
+# Build artifacts
+build/
+dist/
+*.deb
+*.tar.gz
+
+# Ansible
+*.retry
+
+# Misc
+coverage/
+/.tags
+/.tags*
