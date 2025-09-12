@@ -1,6 +1,6 @@
 # Minimal convenience targets (documented only; keep logic light)
 
-.PHONY: help format lint test setup apply
+.PHONY: help format lint test setup apply units
 
 help:
 	@echo "Targets: format lint test setup apply"
@@ -19,3 +19,6 @@ setup:
 
 apply:
 	@sudo ./bin/apply
+
+units:
+	@sudo ./bin/install-units

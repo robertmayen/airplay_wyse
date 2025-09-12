@@ -56,6 +56,8 @@ Optional inventory hints
 - `bin/setup` ensures an AirPlay 2-capable stack: installs APT packages (shairport-sync, nqptp) and, if AirPlay 2 or nqptp are unavailable via APT, builds them from source automatically. It writes `/etc/shairport-sync.conf`, installs a hardened override for `shairport-sync`, and enables nqptp + shairport services.
 - `bin/apply` updates `/etc/shairport-sync.conf` when you change name or ALSA settings and restarts shairport-sync.
 - `systemd/airplay-wyse-identity.service` runs before shairport-sync to ensure unique identity and sane defaults even if you didn’t run apply.
+  - The `shairport-sync` unit has a hard dependency (`Requires=airplay-wyse-identity.service`) and ordering (`After=`) so Shairport only starts if identity succeeds.
+  - The identity oneshot also `Wants=` and runs `After=network-online.target` to avoid races with NIC bring-up and mDNS advertising.
 - No periodic root timers, no on-device GitOps, no custom Avahi config unless you explicitly add one.
 
 ## Tips

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# install-units: convenience helper to deploy/refresh systemd units and ordering.
+# - daemon-reload
+# - enable airplay-wyse-identity.service (runs before shairport)
+# - restart shairport-sync to pick up drop-ins
+
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [install-units] $*"; }
+die() { echo "[install-units] ERROR: $*" >&2; exit 1; }
+
+[[ "$(id -u)" -eq 0 ]] || die "must be run as root"
+
+command -v systemctl >/dev/null 2>&1 || die "systemd required"
+
+log "daemon-reload"
+systemctl daemon-reload
+
+log "enable airplay-wyse-identity.service"
+systemctl enable airplay-wyse-identity.service || true
+
+log "restart shairport-sync"
+systemctl restart shairport-sync.service || true
+
+log "done"
+

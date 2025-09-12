@@ -151,6 +151,13 @@ main() {
   test_nqptp
   test_shairport_sync
   test_avahi_advertisement
+  # Identity checks via verify-airplay-identity: asserts non-empty AirPlay2 pk and non-zero RAOP deviceid.
+  if [[ -x "$(dirname "$0")/verify-airplay-identity" ]]; then
+    if ! "$(dirname "$0")/verify-airplay-identity"; then
+      log "Suggestion: sudo /opt/airplay_wyse/bin/identity-ensure --force && sudo systemctl restart shairport-sync"
+      if [[ $STRICT -eq 1 ]]; then exit 1; fi
+    fi
+  fi
   test_alsa_device
   [[ $SHOW_LOGS -eq 1 ]] && show_logs || true
   [[ $SHOW_MDNS -eq 1 ]] && show_mdns || true

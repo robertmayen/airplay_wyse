@@ -21,7 +21,9 @@ DEFAULTS_FILE="/etc/default/airplay_wyse"
 log() { echo "$(ts) [identity] $*"; }
 
 FORCE=0
-NETWORK_WAIT_SECS=${AIRPLAY_WYSE_WAIT_SECS:-10}
+# Bound the wait for network and machine-id stabilisation to avoid races on first boot.
+# Default to 20s to cover slow NIC bring-up or deferred machine-id generation.
+NETWORK_WAIT_SECS=${AIRPLAY_WYSE_WAIT_SECS:-20}
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -153,6 +155,17 @@ synthetic_mac_from_machine_id() {
 
 main() {
   parse_args "$@"
+  # Ensure /etc/machine-id exists and is non-empty. On first boot of a clone,
+  # systemd typically (re)generates it very early; we wait briefly to avoid
+  # creating identity based on an empty/duplicated machine-id.
+  local mid_tries=0
+  while { [[ ! -s /etc/machine-id ]] || [[ "$(cat /etc/machine-id 2>/dev/null || true)" == "" ]]; } \
+        && [[ $mid_tries -lt $NETWORK_WAIT_SECS ]]; do
+    sleep 1; mid_tries=$((mid_tries+1))
+  done
+  if [[ ! -s /etc/machine-id ]]; then
+    log "machine-id not present after ${NETWORK_WAIT_SECS}s; proceeding cautiously"
+  fi
   # Derive interface with bounded wait
   local iface mac name cur_name cur_hwaddr tries=0
   iface="$(choose_primary_iface || true)"
@@ -165,7 +178,8 @@ main() {
     log "no primary interface detected; proceeding without interface binding"
   fi
 
-  # Read MAC with retry, else synthesize from machine-id
+  # Read MAC with retry, else synthesize from machine-id. This prevents
+  # RAOP from advertising an all-zero deviceid on early boot races.
   tries=0
   mac="${HW_ADDR:-$(read_mac_from_iface "${iface:-}" || true)}"
   while { [[ -z "${mac:-}" ]] || mac_is_zero "$mac"; } && [[ $tries -lt $NETWORK_WAIT_SECS ]]; do

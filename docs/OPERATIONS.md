@@ -45,6 +45,23 @@ Identity management
   - Cloned images are reset safely: on first-run or when the host fingerprint changes, it purges Shairport’s AP2 state so a fresh keypair is generated on next start.
   - Fingerprint includes `machine-id`, hostname and MAC; state recorded at `/var/lib/airplay_wyse/instance.json`.
 
+## Cloning Checklist
+When cloning images across multiple hosts, ensure identity is unique and RAOP does not collide:
+
+- Ensure each clone has a unique `/etc/machine-id`.
+  - On systemd systems, this is regenerated automatically on first boot; see https://unix.stackexchange.com/questions/402999.
+  - The identity oneshot waits briefly for `machine-id` to exist to avoid using an empty or duplicated value.
+- After cloning, run once (as root):
+  - `sudo /opt/airplay_wyse/bin/identity-ensure --force && sudo systemctl restart shairport-sync`
+  - This purges Shairport-Sync’s AirPlay-2 state (usually under `/var/lib/shairport-sync/` via the unit’s StateDirectory) so a fresh keypair is generated. The `_airplay._tcp` TXT `pk` will change as a result.
+- Verify from the device:
+  - `./bin/verify-airplay-identity` prints a summary and fails if `pk` is missing or if `deviceid` is `00:00:00:00:00:00`.
+  - `./bin/test-airplay2 --mdns` includes the same checks.
+
+Notes
+- The identity step writes `interface = "...";` and `hardware_address = "...";` into `/etc/shairport-sync.conf` to pin mDNS advertisement to the chosen NIC and avoid zero-MAC RAOP collisions.
+- The chosen interface is stable and deterministic: explicit `AIRPLAY_WYSE_IFACE` → default route NIC → first UP with carrier → first UP non-loopback.
+
 Interface override and timing
 - The identity step chooses the primary interface deterministically: env override `AIRPLAY_WYSE_IFACE` (or `/etc/default/airplay_wyse`) → default route NIC → first UP with carrier → first UP non‑loopback. It waits up to 10s for an interface to appear before synthesizing a fallback device identity.
 

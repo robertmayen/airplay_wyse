@@ -4,7 +4,13 @@ set -euo pipefail
 # verify-airplay-identity: developer convenience script
 # - Dumps local _airplay._tcp and _raop._tcp TXT
 # - Fails if pk missing or deviceid is zero
+# - Additionally, when an identity reset was detected (instance.json mtime changed),
+#   asserts that the current pk differs from the previously cached pk.
 # - Prints one-line summary: <host> pk=<first8> deviceid=<MAC> iface=<iface>
+
+STATE_DIR="/var/lib/airplay_wyse"
+VERIFY_FILE="$STATE_DIR/verify.json"
+INSTANCE_FILE="$STATE_DIR/instance.json"
 
 host_short() { hostname -s 2>/dev/null || hostname; }
 
@@ -27,6 +33,41 @@ extract_for_host() {
   avahi_dump "$type" | awk -v h="${h,,}" 'BEGIN{s=0} tolower($0)~h{ s=1 } s && /txt/ {print} s && /^=/ {print; s=0}'
 }
 
+stat_mtime() {
+  # Portable-ish mtime extractor: Linux (stat -c %Y) and BSD/macOS (stat -f %m)
+  local path="$1"; [[ -e "$path" ]] || { echo ""; return 0; }
+  if stat -c %Y "$path" >/dev/null 2>&1; then
+    stat -c %Y "$path" 2>/dev/null || true
+  elif stat -f %m "$path" >/dev/null 2>&1; then
+    stat -f %m "$path" 2>/dev/null || true
+  else
+    echo "" # Unknown platform; skip mtime-based checks
+  fi
+}
+
+read_verify_json() {
+  local field="$1"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r ".${field} // empty" "$VERIFY_FILE" 2>/dev/null || true
+  else
+    awk -F'"' -v k="$field" '$2==k{print $4}' "$VERIFY_FILE" 2>/dev/null || true
+  fi
+}
+
+write_verify_json() {
+  local host="$1" pk="$2" dev="$3" inst_mtime="$4"
+  install -d -m 0755 "$STATE_DIR"
+  cat >"$VERIFY_FILE" <<EOF
+{
+  "host": "${host}",
+  "last_pk": "${pk}",
+  "last_deviceid": "${dev}",
+  "instance_mtime": "${inst_mtime}",
+  "last_checked": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+}
+
 main() {
   local h iface a_txt r_txt pk deviceid rc=0
   h="$(host_short)"
@@ -39,6 +80,7 @@ main() {
   r_txt=$(extract_for_host _raop._tcp "$h" | tr -d '\r')
   pk=$(echo "$a_txt" | grep -Eo 'pk=[0-9a-f]+' | head -n1 | cut -d= -f2 || true)
   deviceid=$( (echo "$a_txt"; echo "$r_txt") | grep -Eio 'deviceid=[0-9a-f:]{17}' | head -n1 | cut -d= -f2 || true)
+
   if [[ -z "${pk:-}" ]]; then
     echo "ERROR: pk missing in _airplay._tcp TXT for host '$h'" >&2
     rc=1
@@ -47,6 +89,22 @@ main() {
     echo "ERROR: deviceid is zero or missing for host '$h'" >&2
     rc=1
   fi
+
+  # If identity was reset since last verification, ensure pk changed
+  local inst_mtime prev_inst_mtime prev_pk
+  inst_mtime="$(stat_mtime "$INSTANCE_FILE" || true)"
+  prev_inst_mtime="$(read_verify_json instance_mtime || true)"
+  prev_pk="$(read_verify_json last_pk || true)"
+  if [[ -n "$inst_mtime" && -n "$prev_inst_mtime" && "$inst_mtime" != "$prev_inst_mtime" ]]; then
+    if [[ -n "$prev_pk" && "$prev_pk" == "$pk" ]]; then
+      echo "ERROR: pk did not change after identity reset (instance.json mtime changed)" >&2
+      rc=1
+    fi
+  fi
+
+  # Cache current observation
+  write_verify_json "$h" "$pk" "$deviceid" "$inst_mtime"
+
   local pkshort
   pkshort="${pk:0:8}"
   echo "${h} pk=${pkshort} deviceid=${deviceid} iface=${iface:-unknown}"
@@ -54,4 +112,3 @@ main() {
 }
 
 main "$@"
-
