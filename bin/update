@@ -62,7 +62,35 @@ main() {
 
   # Fetch tags with pruning to ensure devices drop stale/moved tags
   log "Running: git fetch --tags --force --prune --prune-tags origin"
-  git fetch --tags --force --prune --prune-tags origin
+  set +e
+  GIT_TERMINAL_PROMPT=0 git fetch --tags --force --prune --prune-tags origin
+  fetch_rc=$?
+  set -e
+  if [[ $fetch_rc -ne 0 ]]; then
+    # Fallback: if origin is SSH (e.g., git@github.com:org/repo.git), try HTTPS to avoid host key prompts
+    origin_url=$(git remote get-url origin 2>/dev/null || echo "")
+    https_url=""
+    if echo "$origin_url" | grep -Eq '^git@[^:]+:'; then
+      host=$(echo "$origin_url" | sed -E 's/^git@([^:]+):.*/\1/')
+      path=$(echo "$origin_url" | sed -E 's/^git@[^:]+:(.*)$/\1/')
+      https_url="https://$host/$path"
+    elif echo "$origin_url" | grep -Eq '^ssh://'; then
+      # Convert ssh://host/path to https://host/path
+      https_url=$(echo "$origin_url" | sed -E 's#^ssh://#https://#')
+    fi
+    if [[ -n "$https_url" ]]; then
+      log "SSH fetch failed (rc=$fetch_rc); retrying via $https_url"
+      set +e
+      GIT_TERMINAL_PROMPT=0 git fetch "$https_url" --tags --force --prune --prune-tags
+      fetch_rc=$?
+      set -e
+    fi
+    if [[ $fetch_rc -ne 0 ]]; then
+      log "Updater failed rc=$fetch_rc"
+      write_last_update "" $fetch_rc
+      exit $fetch_rc
+    fi
+  fi
 
   # Prefer per-host inventory target_tag
   local inv="$REPO_DIR/inventory/hosts/$(short_host).yml"

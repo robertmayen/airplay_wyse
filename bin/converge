@@ -195,6 +195,9 @@ render_template() {
   tmp=$(mktemp -p "$TMPDIR")
   cp "$src" "$tmp"
   # Use perl for robust placeholder replacement (handles braces and special chars)
+  # Avoid in-place edits (-i) to play nicely with strict seccomp filters.
+  local tmp_out
+  tmp_out=$(mktemp -p "$TMPDIR")
   AIRPLAY_NAME="$AIRPLAY_NAME" \
   ALSA_DEVICE="$ALSA_DEVICE" \
   AVAHI_IFACE="$AVAHI_IFACE" \
@@ -204,7 +207,10 @@ render_template() {
     s/\{\{ALSA_DEVICE\}\}/$ENV{ALSA_DEVICE}//g;
     s/\{\{AVAHI_IFACE\}\}/$ENV{AVAHI_IFACE}//g;
     s/\{\{ALSA_MIXER\}\}/$ENV{ALSA_MIXER}//g;
-  ' -i "$tmp"
+  ' "$tmp" > "$tmp_out"
+  # Overwrite the original tmp to avoid rename() operations
+  cat "$tmp_out" > "$tmp"
+  rm -f "$tmp_out"
   # If placeholders remain, do not clobber destination; keep tmp for inspection
   if grep -q '{{' "$tmp" 2>/dev/null; then
     log "WARN: template placeholders unresolved in $src; skipping install"
@@ -433,7 +439,11 @@ apply_configs() {
   local tmp_ss; tmp_ss=$(mktemp -p "$TMPDIR")
   render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
   if [[ -z "${ALSA_MIXER:-}" ]]; then
-    sed -i "/mixer_control_name/d" "$tmp_ss"
+    # Remove mixer_control_name line without using in-place sed (seccomp-friendly)
+    local tmp2; tmp2=$(mktemp -p "$TMPDIR")
+    grep -v -E '^[[:space:]]*mixer_control_name' "$tmp_ss" > "$tmp2" || true
+    cat "$tmp2" > "$tmp_ss"
+    rm -f "$tmp2"
   fi
   if [[ ! -f "/etc/shairport-sync.conf" ]] || ! cmp -s "$tmp_ss" "/etc/shairport-sync.conf"; then
     install -m 0644 "$tmp_ss" /etc/shairport-sync.conf
