@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[smoke] Minimal smoke test"
+echo "[smoke] Minimal smoke test (simplified arch)"
 
 # Validate script presence
-for f in bin/reconcile bin/update bin/converge bin/health bin/diag bin/alsa-probe; do
+for f in bin/setup bin/apply bin/health bin/diag bin/alsa-probe; do
   [[ -x "$f" ]] || { echo "[smoke] missing or not executable: $f" >&2; exit 1; }
 done
 

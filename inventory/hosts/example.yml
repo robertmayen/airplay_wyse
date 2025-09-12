@@ -1,9 +1,7 @@
-airplay_name: "Wyse-5070"
-nic: enp3s0
-# Optional ALSA overrides
+---
+# Optional ALSA overrides (used by bin/alsa-probe)
 alsa:
-  mixer: "PCM"
-  device_num: 0
-  # vendor_id: "0x08bb"
-  # product_id: "0x2902"
-
+  mixer: "PCM"         # optional
+  device_num: 0         # optional (default 0)
+  # vendor_id: "0x08bb" # optional (USB VID)
+  # product_id: "0x2902"# optional (USB PID)

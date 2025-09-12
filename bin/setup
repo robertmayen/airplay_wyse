@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# One-time setup for AirPlay Wyse (least-privilege model)
+# - Installs shairport-sync (AirPlay 2) and nqptp
+# - Installs hardened systemd override for shairport-sync
+# - Writes /etc/shairport-sync.conf from a minimal template
+# - Enables and starts nqptp + shairport-sync
+
+REPO_DIR="/opt/airplay_wyse"
+TEMPLATE_MIN="$REPO_DIR/cfg/shairport-sync.minimal.conf.tmpl"
+TARGET_CONF="/etc/shairport-sync.conf"
+SH_OVERRIDE_SRC="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
+SH_OVERRIDE_DIR="/etc/systemd/system/shairport-sync.service.d"
+SH_OVERRIDE_DEST="$SH_OVERRIDE_DIR/override.conf"
+
+log() { echo "$(date --iso-8601=seconds) [setup] $*"; }
+die() { echo "[setup] ERROR: $*" >&2; exit 1; }
+
+require_root() { [[ "$(id -u)" -eq 0 ]] || die "must be run as root"; }
+
+ensure_pkg() {
+  local pkg="$1"
+  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    log "installing package: $pkg"
+    apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg"
+  fi
+}
+
+render_conf() {
+  local name="$1" device="$2" mixer="$3"
+  [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
+
+  # Render variables
+  local tmp
+  tmp=$(mktemp)
+  sed \
+    -e "s/{{AIRPLAY_NAME}}/${name//\//\/}/g" \
+    -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
+    -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
+    "$TEMPLATE_MIN" > "$tmp"
+  # Drop optional mixer line if empty
+  if [[ -z "$mixer" ]]; then
+    grep -v 'mixer_control_name' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+  fi
+  install -m 0644 "$tmp" "$TARGET_CONF"
+  rm -f "$tmp"
+}
+
+install_override() {
+  if [[ -f "$SH_OVERRIDE_SRC" ]]; then
+    install -d -m 0755 "$SH_OVERRIDE_DIR"
+    install -m 0644 "$SH_OVERRIDE_SRC" "$SH_OVERRIDE_DEST"
+    systemctl daemon-reload
+  fi
+}
+
+main() {
+  require_root
+  command -v systemctl >/dev/null 2>&1 || die "systemd is required"
+
+  local name device mixer
+  name="${AIRPLAY_NAME:-Wyse DAC}"
+  mixer="${ALSA_MIXER:-}"
+
+  # Determine ALSA device: prefer explicit env, else alsa-probe, else hw:0,0
+  if [[ -n "${ALSA_DEVICE:-}" ]]; then
+    device="$ALSA_DEVICE"
+  elif [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
+    device="$($REPO_DIR/bin/alsa-probe || true)"
+    device="${device:-hw:0,0}"
+  else
+    device="hw:0,0"
+  fi
+
+  log "ensuring packages (shairport-sync, nqptp)"
+  ensure_pkg shairport-sync
+  ensure_pkg nqptp
+
+  log "installing shairport-sync override (hardened + nqptp ordering)"
+  install_override
+
+  log "writing $TARGET_CONF (name='$name', device='$device')"
+  render_conf "$name" "$device" "${mixer:-}"
+
+  log "enabling and starting services"
+  systemctl enable --now nqptp.service
+  systemctl enable --now shairport-sync.service
+
+  log "done"
+}
+
+main "$@"
+

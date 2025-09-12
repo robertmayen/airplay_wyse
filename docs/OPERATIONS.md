@@ -1,34 +1,35 @@
-# Operations (Root-Run Model)
+# Operations (Simplified, Least‑Privilege)
 
-This document describes the operational workflow for running a Wyse 5070 + USB DAC as an AirPlay 2 receiver with GitOps. Services run as root with strong systemd hardening (ProtectSystem=strict with narrowly scoped ReadWritePaths); no sudoers or wrapper scripts are required.
+This document describes a simplified operational workflow for running a Wyse 5070 + USB DAC as an AirPlay 2 receiver. There is no periodic, root‑run GitOps loop. Privileged work is limited to one‑time setup and on‑demand config application.
 
 ## Overview
-- Devices run `reconcile.timer` → `reconcile.service` as the root user under a hardened sandbox.
-- `reconcile` executes `update` (fetch/select/checkout tag) then `converge` (ensure APT packages, render configs, restart services, record health).
+- Install once with `bin/setup` (root): installs packages, writes `/etc/shairport-sync.conf`, installs hardened shairport override, enables nqptp + shairport.
+- Apply config changes with `bin/apply` (root) when name or ALSA settings change.
+- Shairport runs as its vendor user with a hardened systemd override. NQPTP runs via its vendor unit.
 
 ## Prerequisites (Device)
 - Debian 13 preferred (APT provides `shairport-sync` with AirPlay 2 and `nqptp`).
 - Repository cloned to `/opt/airplay_wyse`.
-- Systemd units installed:
-  - Copy `systemd/reconcile.*`, `systemd/converge.service` to `/etc/systemd/system/`.
-  - Copy overrides: `systemd/overrides/*/` to `/etc/systemd/system/`.
-  - `systemctl daemon-reload && systemctl enable --now reconcile.timer`.
 
-Important
-- Run `bin/converge` as root (`sudo`) — it writes to `/etc` and manages services.
-- Inventory YAML must be left-aligned keys (no leading spaces):
-  ```yaml
-  airplay_name: "Wyse DAC"
-  nic: wlp0s12f0
-  ```
-  File path: `/opt/airplay_wyse/inventory/hosts/<short-hostname>.yml`.
-  The `<short-hostname>` is from `hostname -s`.
+## Setup
+Run once (as root):
+```
+sudo ./bin/setup
+```
+Options:
+- Default device name is "Wyse DAC".
+- ALSA device is auto‑detected via `bin/alsa-probe` (falls back to `hw:0,0`).
 
-## Inventory (Optional)
-`inventory/hosts/<short-hostname>.yml`:
+## Update Configuration
+Apply new name or ALSA settings (as root):
+```
+sudo ./bin/apply --name "Living Room"
+sudo ./bin/apply --device hw:0,0 --mixer PCM
+```
+
+## Optional Host Inventory
+For environments with multiple similar hosts, `bin/alsa-probe` continues to honor optional hints at `inventory/hosts/<short-hostname>.yml`:
 ```yaml
-airplay_name: "Living Room"
-nic: enp3s0
 alsa:
   mixer: "PCM"        # optional
   device_num: 0       # optional
@@ -36,58 +37,24 @@ alsa:
   product_id: "0x2902"# optional (USB)
 ```
 
-## Controller Workflow (GitOps)
-1. Commit changes to templates or scripts.
-2. Tag a release: `git tag -s v1.0.0 -m "minimal release"` (signing optional).
-3. Push: `git push origin main v1.0.0`.
-4. Devices fetch and converge on the next timer tick.
-
-Fixing device update errors (403)
-- If `reconcile` logs show a 403 when fetching origin, update the remote URL on the device to a readable endpoint (e.g., a public HTTPS URL), or disable the timer until fixed:
-  - `cd /opt/airplay_wyse && sudo git remote set-url origin https://github.com/<user>/airplay_wyse.git`
-  - or `sudo systemctl disable --now reconcile.timer`
-
 ## Health & Troubleshooting
-- Health JSON: `/var/lib/airplay_wyse/last-health.json`.
-- Quick view: `./bin/health` (read-only viewer; prints JSON and quick probes; does not modify state).
-- Logs: `journalctl -u reconcile -n 200`.
-- Hold updates: `sudo touch /etc/airplay_wyse/hold` (remove to resume).
-
-## Rollback
-- Tag or retag a previous known-good version (e.g., `v0.9.0`) and push the tag.
-- Devices will fetch and converge to the new target tag on next run.
-
-## Validation (On Device)
+- Quick view: `./bin/health` (prints quick probes; read‑only).
+- Logs: `journalctl -u shairport-sync -n 200` and `journalctl -u nqptp -n 200`.
 - Verify AirPlay 2 capability: `shairport-sync -V | grep -q "AirPlay2"`.
 - Verify nqptp active: `systemctl is-active nqptp`.
 - Verify advertisement: `avahi-browse -rt _airplay._tcp`.
 
 If your device does not appear
-- Ensure `/etc/shairport-sync.conf` has no `{{...}}` placeholders.
-- Ensure `/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf` shows `allow-interfaces=<your_iface>` or delete the drop-in and restart Avahi.
-- Run `sudo /opt/airplay_wyse/bin/converge` again to render configs from inventory.
+- Ensure `/etc/shairport-sync.conf` has no leftover template markers.
+- Remove any custom Avahi restrictions if you previously limited interfaces.
+- Re-run: `sudo ./bin/apply`.
 
-## Notes
-- Converge installs packages via APT (no on-device compilation). Units enforce `ProtectSystem=strict` and allow writes only to:
-  - `/opt/airplay_wyse`, `/var/lib/airplay_wyse`, `/run`, `/run/airplay`
-  - `/etc` (for config deployment)
-  - `/usr` and APT/DPKG state: `/var/lib/apt`, `/var/cache/apt`, `/var/lib/dpkg`, `/var/log`
-- Avahi drop-in template is applied only if different from the current content.
+## Security Notes
+- Shairport runs as its vendor user with hardened limits via `systemd/overrides/shairport-sync.service.d/override.conf`.
+- No root‑run timers or on‑device Git operations.
 
 ## Acceptance Checklist
 - `shairport-sync -V` contains `AirPlay2`.
 - `systemctl is-active nqptp` returns `active`.
 - `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp`.
 - `bin/alsa-probe` returns an ALSA device string and `aplay -D <device>` can open it (busy tolerated).
-- A second `bin/converge` run returns unchanged (idempotent).
-- **Security**: Root-run model with systemd sandboxing; no sudoers or wrapper required.
-
-## Converge Exit Codes
-- 0: healthy (no changes)
-- 2: healthy_changed (changes applied)
-- 3: degraded (missing device, nqptp not healthy, mDNS not visible)
-- 4: invalid_inventory (missing/invalid inventory)
-- 5: verify_failed (tag verification failure; verification occurs in `bin/update`)
-- 6: held (hold file present)
-- 10: pkg_failed (package install/update failed)
-- 11: systemd_failed (service restart failed)

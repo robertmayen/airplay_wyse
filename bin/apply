@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Apply configuration changes (name/ALSA) for AirPlay Wyse.
+# This writes /etc/shairport-sync.conf from the minimal template and restarts shairport-sync.
+
+REPO_DIR="/opt/airplay_wyse"
+TEMPLATE_MIN="$REPO_DIR/cfg/shairport-sync.minimal.conf.tmpl"
+TARGET_CONF="/etc/shairport-sync.conf"
+
+log() { echo "$(date --iso-8601=seconds) [apply] $*"; }
+die() { echo "[apply] ERROR: $*" >&2; exit 1; }
+
+require_root() { [[ "$(id -u)" -eq 0 ]] || die "must be run as root"; }
+
+usage() {
+  cat <<EOF
+Usage: sudo ./bin/apply [--name NAME] [--device ALSA_DEV] [--mixer MIXER]
+
+Examples:
+  sudo ./bin/apply --name "Living Room"
+  sudo ./bin/apply --device hw:0,0 --mixer PCM
+EOF
+}
+
+render_conf() {
+  local name="$1" device="$2" mixer="$3"
+  [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
+
+  local tmp
+  tmp=$(mktemp)
+  sed \
+    -e "s/{{AIRPLAY_NAME}}/${name//\//\/}/g" \
+    -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
+    -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
+    "$TEMPLATE_MIN" > "$tmp"
+  if [[ -z "$mixer" ]]; then
+    grep -v 'mixer_control_name' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+  fi
+  install -m 0644 "$tmp" "$TARGET_CONF"
+  rm -f "$tmp"
+}
+
+main() {
+  require_root
+
+  local name device mixer
+  name="${AIRPLAY_NAME:-}"
+  device="${ALSA_DEVICE:-}"
+  mixer="${ALSA_MIXER:-}"
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) shift; name="${1:-}" ;;
+      --device) shift; device="${1:-}" ;;
+      --mixer) shift; mixer="${1:-}" ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown argument: $1" ;;
+    esac
+    shift || true
+  done
+
+  # Resolve defaults
+  if [[ -z "$name" ]]; then name="Wyse DAC"; fi
+  if [[ -z "$device" ]]; then
+    if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
+      device="$($REPO_DIR/bin/alsa-probe || true)"; device="${device:-hw:0,0}"
+    else
+      device="hw:0,0"
+    fi
+  fi
+
+  log "writing $TARGET_CONF (name='$name', device='$device')"
+  render_conf "$name" "$device" "${mixer:-}"
+
+  log "restarting shairport-sync"
+  systemctl restart shairport-sync.service
+
+  log "done"
+}
+
+main "$@"
+

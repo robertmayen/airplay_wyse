@@ -65,4 +65,5 @@ fi
 echo ""
 
 echo "=== Recent Logs ==="
-journalctl -u reconcile -n 10 --no-pager 2>/dev/null || echo "No reconcile logs available"
+journalctl -u shairport-sync -n 20 --no-pager 2>/dev/null || echo "No shairport logs available"
+journalctl -u nqptp -n 20 --no-pager 2>/dev/null || echo "No nqptp logs available"
