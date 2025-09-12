@@ -6,6 +6,8 @@ general = {
   // interface is managed by identity-ensure at boot for stable mDNS.
   // AirPlay 2 device identity (general.airplay_device_id) is also set at boot
   // from the NIC MAC or a stable synthetic fallback to avoid zero-IDs.
+  // Classic RAOP's MAC-like instance prefix is ensured non-zero by managing
+  // general.hardware_address as needed.
   // References:
   //  - AP2 TXT pk/deviceid: OpenAirplay service_discovery notes
   //  - Shairport-Sync uses general.airplay_device_id (numeric 48-bit) for AP2

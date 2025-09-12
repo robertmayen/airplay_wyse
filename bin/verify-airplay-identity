@@ -56,8 +56,21 @@ read_verify_json() {
 
 write_verify_json() {
   local host="$1" pk="$2" dev="$3" inst_mtime="$4"
-  install -d -m 0755 "$STATE_DIR"
-  cat >"$VERIFY_FILE" <<EOF
+  local out="$VERIFY_FILE" dir_ok=0
+  # Prefer system cache (/var/lib) when writable; otherwise fall back to user cache.
+  # Do not fail the verification if caching is not possible.
+  (
+    set +e
+    install -d -m 0755 "$STATE_DIR" 2>/dev/null
+    test -w "$STATE_DIR" 2>/dev/null
+    dir_ok=$?
+    if [ $dir_ok -ne 0 ]; then
+      local ucache
+      ucache="${XDG_CACHE_HOME:-$HOME/.cache}/airplay_wyse"
+      mkdir -p "$ucache" 2>/dev/null
+      out="$ucache/verify.json"
+    fi
+    cat >"$out" <<EOF
 {
   "host": "${host}",
   "last_pk": "${pk}",
@@ -66,6 +79,7 @@ write_verify_json() {
   "last_checked": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+  ) || true
 }
 
 main() {

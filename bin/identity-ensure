@@ -268,6 +268,24 @@ main() {
     set_conf_value_raw airplay_device_id "$ap2_id"
   fi
 
+  # Ensure RAOP (AirPlay 1) does not advertise an all-zero prefix by providing
+  # a non-zero hardware_address when missing or zero. This affects the RAOP
+  # service instance name, which uses a MAC-like prefix; all-zeros correlate
+  # with unselectable endpoints.
+  # References:
+  # - OpenAirplay service_discovery; Shairport issue #1657
+  local cur_hwaddr target_mac needs_update
+  cur_hwaddr=$(read_conf_value hardware_address || true)
+  target_mac=$(echo "$mac" | tr '[:upper:]' '[:lower:]')
+  needs_update=0
+  if [[ -z "${cur_hwaddr:-}" ]]; then needs_update=1; fi
+  if mac_is_zero "${cur_hwaddr:-00:00:00:00:00:00}"; then needs_update=1; fi
+  if [[ "${cur_hwaddr:-}" != "$target_mac" ]]; then needs_update=1; fi
+  if [[ $needs_update -eq 1 ]]; then
+    log "setting hardware_address (RAOP) to $target_mac"
+    set_conf_value hardware_address "$target_mac"
+  fi
+
   # Ensure a unique default name if name missing or generic
   cur_name=$(read_conf_value name || true)
   if [[ -z "${cur_name:-}" || "$cur_name" =~ ^Wyse[[:space:]]+DAC$ ]]; then

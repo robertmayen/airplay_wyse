@@ -58,8 +58,10 @@ When cloning images across multiple hosts, ensure identity is unique and RAOP do
   - `./bin/verify-airplay-identity` prints a summary and fails if `pk` is missing or if `deviceid` is `00:00:00:00:00:00`.
   - `./bin/test-airplay2 --mdns` includes the same checks.
 
-Notes
-- The identity step writes `interface = "...";` and `airplay_device_id = 0x...L;` into `/etc/shairport-sync.conf` to bind mDNS to the chosen NIC and avoid zero IDs. Classic RAOP remains available; its instance prefix derives from a MAC-like value and must not be all zeros.
+- Notes
+- The identity step writes `interface = "...";`, `airplay_device_id = 0x...L;` (AP2), and `hardware_address = "...";` (RAOP) into `/etc/shairport-sync.conf`.
+  - AP2 identity uses `airplay_device_id` and TXT `pk`.
+  - Classic RAOP uses a MAC-like prefix for its instance name; we ensure it is non‑zero by setting `hardware_address` when missing or zero.
 - The chosen interface is stable and deterministic: explicit `AIRPLAY_WYSE_IFACE` → default route NIC → first UP with carrier → first UP non-loopback.
 
 Why pk uniqueness matters
