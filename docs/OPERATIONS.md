@@ -19,12 +19,14 @@ sudo ./bin/setup
 Options:
 - Default device name is "Wyse DAC".
 - ALSA device is auto‑detected via `bin/alsa-probe` (falls back to `hw:0,0`).
+ - AirPlay 2 only: `bin/setup` guarantees `nqptp` is installed. If `shairport-sync` with AirPlay 2 or `nqptp` are not available via APT, they are built from source automatically.
 
 ## Update Configuration
-Apply new name or ALSA settings (as root):
+Apply new name, ALSA settings, or bind to a specific network interface (as root):
 ```
 sudo ./bin/apply --name "Living Room"
 sudo ./bin/apply --device hw:0,0 --mixer PCM
+sudo ./bin/apply --interface wlp0s12f0
 ```
 
 ## Optional Host Inventory
@@ -46,12 +48,16 @@ alsa:
 
 If your device does not appear
 - Ensure `/etc/shairport-sync.conf` has no leftover template markers.
+- Try binding to your active NIC using `--interface <iface>`; find it via `ip -o link show | grep 'state UP'`.
 - Remove any custom Avahi restrictions if you previously limited interfaces.
 - Re-run: `sudo ./bin/apply`.
 
 ## Security Notes
 - Shairport runs as its vendor user with hardened limits via `systemd/overrides/shairport-sync.service.d/override.conf`.
 - No root‑run timers or on‑device Git operations.
+
+Note on NQPTP
+- AirPlay 2 requires `nqptp`. Setup installs it; if the package is unavailable, it is built from source automatically. The service override requires `nqptp` and orders shairport after it.
 
 ## Acceptance Checklist
 - `shairport-sync -V` contains `AirPlay2`.

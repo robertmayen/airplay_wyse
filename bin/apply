@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Apply configuration changes (name/ALSA) for AirPlay Wyse.
+# Apply configuration changes (name/ALSA[/mixer]/interface) for AirPlay Wyse.
 # This writes /etc/shairport-sync.conf from the minimal template and restarts shairport-sync.
 
 # Resolve repo dir relative to this script
@@ -17,16 +17,17 @@ require_root() { [[ "$(id -u)" -eq 0 ]] || die "must be run as root"; }
 
 usage() {
   cat <<EOF
-Usage: sudo ./bin/apply [--name NAME] [--device ALSA_DEV] [--mixer MIXER]
+Usage: sudo ./bin/apply [--name NAME] [--device ALSA_DEV] [--mixer MIXER] [--interface IFACE]
 
 Examples:
   sudo ./bin/apply --name "Living Room"
   sudo ./bin/apply --device hw:0,0 --mixer PCM
+  sudo ./bin/apply --interface wlp0s12f0
 EOF
 }
 
 render_conf() {
-  local name="$1" device="$2" mixer="$3"
+  local name="$1" device="$2" mixer="$3" iface="$4"
   [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
 
   local tmp
@@ -35,9 +36,14 @@ render_conf() {
     -e "s/{{AIRPLAY_NAME}}/${name//\//\/}/g" \
     -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
     -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
+    -e "s/{{AVAHI_IFACE}}/${iface//\//\/}/g" \
     "$TEMPLATE_MIN" > "$tmp"
   if [[ -z "$mixer" ]]; then
     grep -v 'mixer_control_name' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
+  fi
+  if [[ -z "$iface" ]]; then
+    # Drop interface line if not provided
+    grep -v '^[[:space:]]*interface[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
   fi
   install -m 0644 "$tmp" "$TARGET_CONF"
   rm -f "$tmp"
@@ -46,10 +52,11 @@ render_conf() {
 main() {
   require_root
 
-  local name device mixer
+  local name device mixer iface
   name="${AIRPLAY_NAME:-}"
   device="${ALSA_DEVICE:-}"
   mixer="${ALSA_MIXER:-}"
+  iface="${AVAHI_IFACE:-}"
 
   # Parse flags
   while [[ $# -gt 0 ]]; do
@@ -57,6 +64,7 @@ main() {
       --name) shift; name="${1:-}" ;;
       --device) shift; device="${1:-}" ;;
       --mixer) shift; mixer="${1:-}" ;;
+      --interface|--iface) shift; iface="${1:-}" ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown argument: $1" ;;
     esac
@@ -73,8 +81,8 @@ main() {
     fi
   fi
 
-  log "writing $TARGET_CONF (name='$name', device='$device')"
-  render_conf "$name" "$device" "${mixer:-}"
+  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'})"
+  render_conf "$name" "$device" "${mixer:-}" "${iface:-}"
 
   log "restarting shairport-sync"
   systemctl restart shairport-sync.service

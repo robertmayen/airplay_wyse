@@ -23,13 +23,27 @@ fi
 echo
 echo "--- Runtime probes ---"
 if command -v shairport-sync >/dev/null 2>&1; then
-  shairport-sync -V 2>&1 | head -1 | sed 's/^/shairport: /'
+  ver_line=$(shairport-sync -V 2>&1 | head -1)
+  echo "shairport: $ver_line"
+  if echo "$ver_line" | grep -q "AirPlay2"; then
+    echo "ap2: yes"
+  else
+    echo "ap2: no"
+  fi
 fi
 if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "nqptp.service"; then
   systemctl is-active --quiet nqptp 2>/dev/null && echo "nqptp: active" || echo "nqptp: inactive"
 fi
 if command -v avahi-browse >/dev/null 2>&1; then
-  timeout 5 avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp" && echo "mdns: _airplay visible" || echo "mdns: _airplay not visible"
+  if timeout 5 avahi-browse -rt _airplay._tcp 2>/dev/null | grep -q "_airplay._tcp"; then
+    echo "mdns: _airplay visible"
+  else
+    if timeout 5 avahi-browse -rt _raop._tcp 2>/dev/null | grep -q "_raop._tcp"; then
+      echo "mdns: _airplay not visible; _raop visible"
+    else
+      echo "mdns: neither _airplay nor _raop visible"
+    fi
+  fi
 fi
 
 exit 0

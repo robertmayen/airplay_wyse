@@ -2,6 +2,7 @@
 general = {
   name = "{{AIRPLAY_NAME}}";
   mdns_backend = "avahi";
+  interface = "{{AVAHI_IFACE}}"; // optional; removed if unset
 };
 
 alsa = {
@@ -9,4 +10,3 @@ alsa = {
   // Optional: removed if unset
   mixer_control_name = "{{ALSA_MIXER}}";
 };
-

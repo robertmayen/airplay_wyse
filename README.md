@@ -6,8 +6,8 @@ Minimal AirPlay 2 receiver for Wyse 5070 with USB DAC — now with a simplified,
 
 This repo configures a Wyse 5070 + USB DAC as an AirPlay 2 receiver using:
 
-- Shairport Sync (AirPlay 2) via APT
-- NQPTP for precise timing via APT
+- Shairport Sync (AirPlay 2) via APT (or built from source if needed)
+- NQPTP for precise timing via APT (or built from source if needed)
 - A tiny setup/apply workflow (no on-device GitOps, no periodic root jobs)
 
 What changed: previous versions used a root‑run “reconcile/update/converge” model. This has been replaced with a simple one‑time setup and on-demand apply flow. Shairport runs as its vendor user with hardened systemd overrides, and privileged actions happen only during setup/apply.
@@ -17,9 +17,10 @@ What changed: previous versions used a root‑run “reconcile/update/converge�
 1) Install packages and configure once (as root):
 - `sudo ./bin/setup`  (auto-detects DAC, sets name "Wyse DAC" by default)
 
-2) Customize name or ALSA device later (as root):
+2) Customize name, ALSA device, or bind to a NIC later (as root):
 - `sudo ./bin/apply --name "Living Room"`  (auto-detect device)
 - or `sudo ./bin/apply --device hw:0,0 --mixer PCM`
+- or `sudo ./bin/apply --interface wlp0s12f0`
 
 3) Verify advertisement:
 - `avahi-browse -rt _airplay._tcp`
@@ -49,7 +50,7 @@ airplay_wyse/
 
 ## How It Works (Simplified)
 
-- `bin/setup` installs APT packages (shairport-sync, nqptp), writes `/etc/shairport-sync.conf`, installs hardened override for `shairport-sync`, and enables nqptp + shairport services.
+- `bin/setup` ensures an AirPlay 2-capable stack: installs APT packages (shairport-sync, nqptp) and, if AirPlay 2 or nqptp are unavailable via APT, it automatically builds them from source. It writes `/etc/shairport-sync.conf`, installs a hardened override for `shairport-sync`, and enables nqptp + shairport services.
 - `bin/apply` updates `/etc/shairport-sync.conf` when you change name or ALSA settings and restarts shairport-sync.
 - No periodic root timers, no on-device GitOps, no custom Avahi config unless you explicitly add one.
 
