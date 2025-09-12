@@ -18,7 +18,9 @@ sudo ./bin/setup
 ```
 Options:
 - Default device name is unique per host (e.g., "Wyse DAC-ABCD", derived from MAC).
-- ALSA device is auto‑detected via `bin/alsa-probe` (falls back to `hw:0,0`).
+- ALSA device is auto‑detected via `bin/alsa-probe`.
+  - USB DACs are selected as raw `hw:<card>,<dev>`.
+  - If no USB DAC is present, onboard codecs fall back to `plughw:<card>,<dev>` so ALSA can resample 44.1 kHz → 48 kHz when needed.
  - AirPlay 2 only: `bin/setup` guarantees `nqptp` is installed. If `shairport-sync` with AirPlay 2 or `nqptp` are not available via APT, they are built from source automatically.
 
 Validate after setup:
