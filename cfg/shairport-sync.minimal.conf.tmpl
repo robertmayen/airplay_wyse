@@ -11,7 +11,11 @@ general = {
   // References:
   //  - AP2 TXT pk/deviceid: OpenAirplay service_discovery notes
   //  - Shairport-Sync uses general.airplay_device_id (numeric 48-bit) for AP2
-  // Optional: enable runtime statistics for debugging (logs underruns/overruns).
+};
+
+// Optional diagnostics (enabled when AIRPLAY_WYSE_DEBUG=1)
+diagnostics = {
+  // Shairport >= 4.3: statistics moved under diagnostics
   statistics = "{{STATISTICS}}";
 };
 
