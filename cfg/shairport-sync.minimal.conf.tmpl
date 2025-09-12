@@ -17,4 +17,8 @@ alsa = {
   output_device = "{{ALSA_DEVICE}}";
   // Optional: removed if unset
   mixer_control_name = "{{ALSA_MIXER}}";
+  // Optional resampling: when using onboard codecs that expose 48 kHz-only
+  // sinks on the raw device, Shairport's resampler can convert 44.1 kHz → 48 kHz.
+  // If set empty, this line is removed.
+  output_rate = {{ALSA_OUTPUT_RATE}};
 };

@@ -164,7 +164,7 @@ main() {
   # shellcheck disable=SC1091
   [[ -f "$LIB_SH" ]] && source "$LIB_SH" || die "missing lib: $LIB_SH"
 
-  local name device mixer iface
+  local name device mixer iface alsa_rate card
   name="${AIRPLAY_NAME:-}"
   mixer="${ALSA_MIXER:-}"
   iface="${AVAHI_IFACE:-}"
@@ -201,9 +201,19 @@ main() {
     name="$(default_airplay_name "${mac:-}")"
   fi
 
+  # If using onboard HDA (non-USB) with raw hw: device, set output_rate=48000
+  # to let Shairport's resampler convert 44.1 → 48 kHz. USB DACs are left unset.
+  alsa_rate=""
+  if [[ "$device" =~ ^hw:([0-9]+),([0-9]+)$ ]]; then
+    card="${BASH_REMATCH[1]}"
+    if [[ ! -f "/sys/class/sound/card${card}/device/../idVendor" ]]; then
+      alsa_rate="48000"
+    fi
+  fi
+
   log "writing $TARGET_CONF (name='$name', device='$device')"
   # identity-ensure will set interface and hardware_address at boot
-  render_conf "$name" "$device" "${mixer:-}" "" ""
+  render_conf "$name" "$device" "${mixer:-}" "" "" "${alsa_rate:-}"
 
   # Ensure identity is set immediately (and self-heal on clones)
   if [[ -x "$IDENTITY_LIBEXEC_DIR/identity-ensure" ]]; then

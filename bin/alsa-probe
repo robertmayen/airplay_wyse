@@ -75,15 +75,14 @@ for cdir in /sys/class/sound/card*; do
   fi
 done
 
-# Fallback: first playback on any non-USB card
-# Many onboard HDA codecs expose 48 kHz-only sinks on the raw hw: device and
-# will reject 44.1 kHz. Use ALSA's plug to enable transparent resampling.
-# See Shairport-Sync ALSA backend notes on output_rate/resampling.
+# Fallback: first playback on any non-USB card.
+# We return the raw hw: device and the repo will set output_rate=48000 in
+# /etc/shairport-sync.conf to use Shairport's resampler for 44.1 → 48 kHz.
 for cdir in /sys/class/sound/card*; do
   [[ -d "$cdir" ]] || continue
   card=$(basename "$cdir"); card=${card#card}
   if p=$(first_playback_dev "$card"); then
-    echo "plughw:${card},${devnum:-$p}"; exit 0
+    echo "hw:${card},${devnum:-$p}"; exit 0
   fi
 done
 

@@ -34,7 +34,7 @@ main() {
   # shellcheck disable=SC1091
   [[ -f "$LIB_SH" ]] && source "$LIB_SH" || die "missing lib: $LIB_SH"
 
-  local name device mixer iface hwaddr primary_if mac
+  local name device mixer iface hwaddr primary_if mac alsa_rate
   name="${AIRPLAY_NAME:-}"
   device="${ALSA_DEVICE:-}"
   mixer="${ALSA_MIXER:-}"
@@ -65,12 +65,22 @@ main() {
       device="hw:0,0"
     fi
   fi
+  # If using onboard HDA (non-USB) with raw hw: device, prefer Shairport's
+  # resampler by setting output_rate=48000 for stability (AirPlay is 44.1 kHz).
+  # For USB DACs (typically support 44.1 kHz), leave unset.
+  alsa_rate=""
+  if [[ "$device" =~ ^hw:([0-9]+),([0-9]+)$ ]]; then
+    card="${BASH_REMATCH[1]}"
+    if [[ ! -f "/sys/class/sound/card${card}/device/../idVendor" ]]; then
+      alsa_rate="48000"
+    fi
+  fi
   # Self-heal identity if this looks like a cloned image
   maybe_reset_identity "$mac"
 
   log "writing $TARGET_CONF (name='$name', device='$device')"
   # identity-ensure manages interface and hardware_address at boot
-  render_conf "$name" "$device" "${mixer:-}" "" ""
+  render_conf "$name" "$device" "${mixer:-}" "" "" "${alsa_rate:-}"
 
   # Ensure identity fields are present immediately (not just on next boot)
   if [[ -x "/usr/local/libexec/airplay_wyse/identity-ensure" ]]; then
