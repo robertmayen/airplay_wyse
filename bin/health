@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="/opt/airplay_wyse"
+# Resolve dirs relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATE_DIR="/var/lib/airplay_wyse"
 
 # Read-only viewer: prints last-health.json if available and augments with quick probes

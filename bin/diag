@@ -9,7 +9,9 @@ echo "Host: $(hostname -f)"
 echo ""
 
 echo "=== Version ==="
-cat /opt/airplay_wyse/VERSION 2>/dev/null || echo "VERSION file not found"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cat "$REPO_DIR/VERSION" 2>/dev/null || echo "VERSION file not found"
 echo ""
 
 echo "=== Git Status ==="
@@ -38,8 +40,8 @@ fi
 echo ""
 
 echo "=== ALSA Device ==="
-if [[ -x /opt/airplay_wyse/bin/alsa-probe ]]; then
-  /opt/airplay_wyse/bin/alsa-probe 2>/dev/null || echo "No ALSA device found"
+if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
+  "$REPO_DIR/bin/alsa-probe" 2>/dev/null || echo "No ALSA device found"
 else
   echo "alsa-probe not found"
 fi

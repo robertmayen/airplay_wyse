@@ -4,7 +4,9 @@ set -euo pipefail
 # Apply configuration changes (name/ALSA) for AirPlay Wyse.
 # This writes /etc/shairport-sync.conf from the minimal template and restarts shairport-sync.
 
-REPO_DIR="/opt/airplay_wyse"
+# Resolve repo dir relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE_MIN="$REPO_DIR/cfg/shairport-sync.minimal.conf.tmpl"
 TARGET_CONF="/etc/shairport-sync.conf"
 
@@ -81,4 +83,3 @@ main() {
 }
 
 main "$@"
-

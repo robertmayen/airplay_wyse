@@ -7,7 +7,9 @@ set -euo pipefail
 # - Writes /etc/shairport-sync.conf from a minimal template
 # - Enables and starts nqptp + shairport-sync
 
-REPO_DIR="/opt/airplay_wyse"
+# Resolve repo dir relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE_MIN="$REPO_DIR/cfg/shairport-sync.minimal.conf.tmpl"
 TARGET_CONF="/etc/shairport-sync.conf"
 SH_OVERRIDE_SRC="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
@@ -92,4 +94,3 @@ main() {
 }
 
 main "$@"
-

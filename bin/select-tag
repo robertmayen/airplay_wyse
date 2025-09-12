@@ -11,7 +11,12 @@ set -euo pipefail
 # Env:
 #   ALLOW_DIRTY=1  to proceed even if working tree is dirty (not recommended)
 
-REPO_DIR="/opt/airplay_wyse"
+# Resolve repo dir relative to this script, fallback to /opt/airplay_wyse
+REPO_DIR="${REPO_DIR:-}"
+if [[ -z "$REPO_DIR" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 log() { echo "$(date --iso-8601=seconds) [select-tag] $*"; }
 die() { echo "[select-tag] ERROR: $*" >&2; exit 1; }
 
@@ -65,4 +70,3 @@ main() {
 }
 
 main "$@"
-

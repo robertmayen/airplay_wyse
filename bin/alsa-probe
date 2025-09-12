@@ -5,7 +5,9 @@ set -euo pipefail
 # Preference: inventory overrides -> USB DACs -> first available playback
 # Exits non-zero if no playable device can be determined.
 
-REPO_DIR="/opt/airplay_wyse"
+# Resolve repo dir relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Optional inventory
 host_short() { hostname -s 2>/dev/null || hostname; }
