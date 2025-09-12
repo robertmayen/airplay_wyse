@@ -23,7 +23,7 @@ parse_args() {
     case "$1" in
       --force) FORCE=1 ;;
       -h|--help)
-        cat <<EOF
+cat <<'EOF'
 Usage: ./bin/identity-ensure [--force]
 Ensures unique AirPlay 2 identity and sane defaults.
   --force   Reset identity unconditionally (clears /var/lib/shairport-sync)
