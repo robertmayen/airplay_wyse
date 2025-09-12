@@ -45,8 +45,8 @@ check "apply writes /etc/shairport-sync.conf" "grep -q '/etc/shairport-sync.conf
 
 # 5) Health monitoring basics
 log "Checking health monitoring..."
-check "Health script exists" "[ -f bin/health ]"
-check "Health script executable" "[ -x bin/health ]"
+check "test-airplay2 exists" "[ -f bin/test-airplay2 ]"
+check "test-airplay2 executable" "[ -x bin/test-airplay2 ]"
 
 # 6) Systemd hardening
 log "Checking systemd security..."
@@ -61,15 +61,17 @@ check "ALSA probe script exists" "[ -f bin/alsa-probe ]"
 
 # 8) Script executability (core)
 log "Checking script permissions..."
-for script in bin/setup bin/apply bin/health bin/diag bin/alsa-probe; do
+for script in bin/setup bin/apply bin/alsa-probe bin/test-airplay2; do
   check "$(basename "$script") is executable" "[ -x $script ]"
 done
 
 # 9) Templates and docs
 log "Checking templates and docs..."
 check "Operations documentation exists" "[ -f docs/OPERATIONS.md ]"
-check "Releases documentation exists" "[ -f docs/RELEASES.md ]"
-check "select-tag helper exists" "[ -f bin/select-tag ]"
+check "No releases doc (using simple updates)" "[ ! -f docs/RELEASES.md ]"
+check "No select-tag helper (no on-device git)" "[ ! -f bin/select-tag ]"
+check "No legacy diag script" "[ ! -f bin/diag ]"
+check "No legacy health script" "[ ! -f bin/health ]"
 
 echo
 echo "=== LINT RESULTS ==="

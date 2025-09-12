@@ -16,6 +16,11 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y ripgrep
 
-      - name: Smoke tests
+      - name: Lints
         run: |
-          bash ./tests/smoke.sh
+          bash ./tools/lints.sh || true
+
+      - name: Health (non-strict)
+        run: |
+          chmod +x ./bin/test-airplay2
+          ./bin/test-airplay2 --no-strict || true

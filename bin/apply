@@ -9,8 +9,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE_MIN="$REPO_DIR/cfg/shairport-sync.minimal.conf.tmpl"
 TARGET_CONF="/etc/shairport-sync.conf"
+LIB_SH="$REPO_DIR/bin/lib.sh"
 
-log() { echo "$(date --iso-8601=seconds) [apply] $*"; }
+log() { echo "$(ts) [apply] $*"; }
 die() { echo "[apply] ERROR: $*" >&2; exit 1; }
 
 require_root() { [[ "$(id -u)" -eq 0 ]] || die "must be run as root"; }
@@ -26,38 +27,14 @@ Examples:
 EOF
 }
 
-render_conf() {
-  local name="$1" device="$2" mixer="$3" iface="$4" hwaddr="$5"
-  [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
-
-  local tmp
-  tmp=$(mktemp)
-  sed \
-    -e "s/{{AIRPLAY_NAME}}/${name//\//\/}/g" \
-    -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
-    -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
-    -e "s/{{AVAHI_IFACE}}/${iface//\//\/}/g" \
-    -e "s/{{HW_ADDR}}/${hwaddr//\//\/}/g" \
-    "$TEMPLATE_MIN" > "$tmp"
-  if [[ -z "$mixer" ]]; then
-    grep -v 'mixer_control_name' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
-  fi
-  if [[ -z "$iface" ]]; then
-    # Drop interface line if not provided
-    grep -v '^[[:space:]]*interface[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
-  fi
-  if [[ -z "$hwaddr" ]]; then
-    # Drop hardware_address line if not provided
-    grep -v '^[[:space:]]*hardware_address[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
-  fi
-  install -m 0644 "$tmp" "$TARGET_CONF"
-  rm -f "$tmp"
-}
+render_conf() { render_shairport_conf "$TEMPLATE_MIN" "$TARGET_CONF" "$@"; }
 
 main() {
   require_root
+  # shellcheck disable=SC1091
+  [[ -f "$LIB_SH" ]] && source "$LIB_SH" || die "missing lib: $LIB_SH"
 
-  local name device mixer iface hwaddr
+  local name device mixer iface hwaddr primary_if mac
   name="${AIRPLAY_NAME:-}"
   device="${ALSA_DEVICE:-}"
   mixer="${ALSA_MIXER:-}"
@@ -78,7 +55,9 @@ main() {
   done
 
   # Resolve defaults
-  if [[ -z "$name" ]]; then name="Wyse DAC"; fi
+  primary_if="${iface:-$(primary_iface || true)}"
+  mac="${hwaddr:-$(derive_hwaddr_from_iface "$primary_if" || true)}"
+  if [[ -z "$name" ]]; then name="$(default_airplay_name "$mac")"; fi
   if [[ -z "$device" ]]; then
     if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
       device="$($REPO_DIR/bin/alsa-probe || true)"; device="${device:-hw:0,0}"
@@ -86,9 +65,12 @@ main() {
       device="hw:0,0"
     fi
   fi
-  if [[ -z "$hwaddr" && -n "${iface:-}" ]]; then
-    hwaddr=$(cat "/sys/class/net/$iface/address" 2>/dev/null | head -n1 || true)
+  if [[ -z "$hwaddr" ]]; then
+    hwaddr="$mac"
   fi
+
+  # Self-heal identity if this looks like a cloned image
+  maybe_reset_identity "$hwaddr"
 
   log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'}${hwaddr:+, hwaddr='$hwaddr'})"
   render_conf "$name" "$device" "${mixer:-}" "${iface:-}" "${hwaddr:-}"

@@ -1,105 +1,162 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Test script for AirPlay 2 functionality
+# AirPlay 2 functional and diagnostic tool
 
-log() { echo "$(date --iso-8601=seconds) [test-airplay2] $*"; }
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+log() { echo "$(ts) [test-airplay2] $*"; }
 fail() { log "ERROR: $*"; exit 1; }
+
+SHOW_LOGS=0
+SHOW_MDNS=0
+SHOW_ALSA=0
+STRICT=1
+
+usage() {
+  cat <<EOF
+Usage: ./bin/test-airplay2 [--logs] [--mdns] [--alsa] [--no-strict]
+
+Default runs strict functionality checks (nqptp, shairport, mDNS, ALSA listing).
+
+  --logs       Show recent shairport/nqptp logs and last-health.json if present
+  --mdns       Show detailed avahi-browse output for _airplay._tcp and _raop._tcp
+  --alsa       Show ALSA cards and attempt basic listing
+  --no-strict  Do not exit non-zero on failures (report only)
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --logs) SHOW_LOGS=1 ;;
+      --mdns) SHOW_MDNS=1 ;;
+      --alsa) SHOW_ALSA=1 ;;
+      --no-strict) STRICT=0 ;;
+      -h|--help) usage; exit 0 ;;
+      *) fail "unknown argument: $1" ;;
+    esac
+    shift || true
+  done
+}
+
+soft_or_fail() {
+  local msg="$1"; shift
+  if ! "$@"; then
+    if [[ $STRICT -eq 1 ]]; then
+      fail "$msg"
+    else
+      log "⚠ $msg"
+      return 1
+    fi
+  fi
+}
 
 test_nqptp() {
   log "Testing nqptp service..."
-  
-  if ! systemctl is-active --quiet nqptp.service; then
-    fail "nqptp service is not active"
-  fi
-  
-  if ! systemctl is-enabled --quiet nqptp.service; then
-    fail "nqptp service is not enabled"
-  fi
-  
-  log "✓ nqptp service is active and enabled"
+  soft_or_fail "nqptp service is not active" systemctl is-active --quiet nqptp.service
+  soft_or_fail "nqptp service is not enabled" systemctl is-enabled --quiet nqptp.service
+  log "✓ nqptp service looks good"
 }
 
 test_shairport_sync() {
   log "Testing shairport-sync..."
-  
-  if ! command -v shairport-sync >/dev/null 2>&1; then
-    fail "shairport-sync binary not found"
-  fi
-  
+  soft_or_fail "shairport-sync binary not found" command -v shairport-sync >/dev/null 2>&1
   local version_output
   version_output=$(shairport-sync -V 2>&1 || true)
-  
   if ! echo "$version_output" | grep -q "AirPlay2"; then
-    fail "shairport-sync does not have AirPlay 2 support"
+    soft_or_fail "shairport-sync does not report AirPlay 2 support" false
   fi
-  
-  if ! systemctl is-active --quiet shairport-sync.service; then
-    fail "shairport-sync service is not active"
-  fi
-  
-  log "✓ shairport-sync has AirPlay 2 support and is active"
-  log "  Version: $(echo "$version_output" | head -1)"
+  soft_or_fail "shairport-sync service is not active" systemctl is-active --quiet shairport-sync.service
+  log "✓ shairport-sync is active (version: $(echo "$version_output" | head -1))"
 }
 
 test_avahi_advertisement() {
   log "Testing Avahi service advertisement..."
-  
   if ! command -v avahi-browse >/dev/null 2>&1; then
     log "⚠ avahi-browse not available, skipping advertisement test"
     return 0
   fi
-  
-  local hostname
+  local hostname browse_output ok=0
   hostname=$(hostname -s | tr '[:upper:]' '[:lower:]')
-  
-  # Check for AirPlay service advertisement
-  local browse_output
   browse_output=$(timeout 10 avahi-browse -rt _airplay._tcp 2>/dev/null || true)
-  
   if [[ -n "$browse_output" ]] && echo "$browse_output" | grep -qi "$hostname"; then
-    log "✓ AirPlay service is being advertised"
-    return 0
+    log "✓ AirPlay (_airplay._tcp) is advertised"
+    ok=1
   fi
-  
-  # Fallback to RAOP
-  browse_output=$(timeout 10 avahi-browse -rt _raop._tcp 2>/dev/null || true)
-  
-  if [[ -n "$browse_output" ]] && echo "$browse_output" | grep -qi "$hostname"; then
-    log "✓ RAOP service is being advertised"
-    return 0
+  if [[ $ok -eq 0 ]]; then
+    browse_output=$(timeout 10 avahi-browse -rt _raop._tcp 2>/dev/null || true)
+    if [[ -n "$browse_output" ]] && echo "$browse_output" | grep -qi "$hostname"; then
+      log "✓ RAOP (_raop._tcp) is advertised"
+      ok=1
+    fi
   fi
-  
-  log "⚠ No AirPlay/RAOP service advertisement found"
+  if [[ $ok -eq 0 ]]; then
+    soft_or_fail "No AirPlay/RAOP service advertisement found" false
+  fi
 }
 
 test_alsa_device() {
-  log "Testing ALSA device..."
-  
+  log "Testing ALSA availability..."
   if ! command -v aplay >/dev/null 2>&1; then
     log "⚠ aplay not available, skipping ALSA test"
     return 0
   fi
-  
-  # Check if we can list audio devices
   if ! aplay -l >/dev/null 2>&1; then
-    log "⚠ No ALSA audio devices found"
+    soft_or_fail "No ALSA audio devices found" false
     return 0
   fi
-  
-  log "✓ ALSA audio devices are available"
+  log "✓ ALSA audio devices are present"
+}
+
+show_logs() {
+  echo "=== Recent Logs ==="
+  journalctl -u shairport-sync -n 30 --no-pager 2>/dev/null || echo "No shairport logs available"
+  journalctl -u nqptp -n 30 --no-pager 2>/dev/null || echo "No nqptp logs available"
+  echo
+  if [[ -f /var/lib/airplay_wyse/last-health.json ]]; then
+    echo "=== Last Health ==="
+    if command -v jq >/dev/null 2>&1; then
+      jq . /var/lib/airplay_wyse/last-health.json 2>/dev/null || cat /var/lib/airplay_wyse/last-health.json
+    else
+      cat /var/lib/airplay_wyse/last-health.json
+    fi
+  fi
+}
+
+show_mdns() {
+  echo "=== mDNS Details ==="
+  if command -v avahi-browse >/dev/null 2>&1; then
+    echo "-- _airplay._tcp --"
+    timeout 10 avahi-browse -rt _airplay._tcp 2>/dev/null || true
+    echo
+    echo "-- _raop._tcp --"
+    timeout 10 avahi-browse -rt _raop._tcp 2>/dev/null || true
+  else
+    echo "avahi-browse not installed"
+  fi
+}
+
+show_alsa() {
+  echo "=== ALSA Devices ==="
+  if command -v aplay >/dev/null 2>&1; then
+    aplay -l 2>/dev/null || true
+  else
+    echo "aplay not installed"
+  fi
 }
 
 main() {
-  log "Starting AirPlay 2 functionality tests..."
-  
+  parse_args "$@"
+  log "Starting AirPlay 2 checks..."
   test_nqptp
   test_shairport_sync
   test_avahi_advertisement
   test_alsa_device
-  
-  log "✓ All AirPlay 2 tests completed successfully"
-  log "The system should now be discoverable as an AirPlay receiver"
+  [[ $SHOW_LOGS -eq 1 ]] && show_logs || true
+  [[ $SHOW_MDNS -eq 1 ]] && show_mdns || true
+  [[ $SHOW_ALSA -eq 1 ]] && show_alsa || true
+  log "✓ Checks complete"
+  log "Device should be discoverable as an AirPlay receiver"
 }
 
 main "$@"

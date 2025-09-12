@@ -15,8 +15,9 @@ TARGET_CONF="/etc/shairport-sync.conf"
 SH_OVERRIDE_SRC="$REPO_DIR/systemd/overrides/shairport-sync.service.d/override.conf"
 SH_OVERRIDE_DIR="/etc/systemd/system/shairport-sync.service.d"
 SH_OVERRIDE_DEST="$SH_OVERRIDE_DIR/override.conf"
+LIB_SH="$REPO_DIR/bin/lib.sh"
 
-log() { echo "$(date --iso-8601=seconds) [setup] $*"; }
+log() { echo "$(ts) [setup] $*"; }
 die() { echo "[setup] ERROR: $*" >&2; exit 1; }
 
 require_root() { [[ "$(id -u)" -eq 0 ]] || die "must be run as root"; }
@@ -120,35 +121,7 @@ EOF
   fi
 }
 
-render_conf() {
-  local name="$1" device="$2" mixer="$3" iface="$4" hwaddr="$5"
-  [[ -f "$TEMPLATE_MIN" ]] || die "missing template: $TEMPLATE_MIN"
-
-  # Render variables
-  local tmp
-  tmp=$(mktemp)
-  sed \
-    -e "s/{{AIRPLAY_NAME}}/${name//\//\/}/g" \
-    -e "s/{{ALSA_DEVICE}}/${device//\//\/}/g" \
-    -e "s/{{ALSA_MIXER}}/${mixer//\//\/}/g" \
-    -e "s/{{AVAHI_IFACE}}/${iface//\//\/}/g" \
-    -e "s/{{HW_ADDR}}/${hwaddr//\//\/}/g" \
-    "$TEMPLATE_MIN" > "$tmp"
-  # Drop optional mixer line if empty
-  if [[ -z "$mixer" ]]; then
-    grep -v 'mixer_control_name' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
-  fi
-  # Drop interface line if empty
-  if [[ -z "$iface" ]]; then
-    grep -v '^[[:space:]]*interface[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
-  fi
-  # Drop hardware address line if empty
-  if [[ -z "$hwaddr" ]]; then
-    grep -v '^[[:space:]]*hardware_address[[:space:]]*=' "$tmp" > "${tmp}.2" && mv "${tmp}.2" "$tmp"
-  fi
-  install -m 0644 "$tmp" "$TARGET_CONF"
-  rm -f "$tmp"
-}
+render_conf() { render_shairport_conf "$TEMPLATE_MIN" "$TARGET_CONF" "$@"; }
 
 install_override() {
   if [[ -f "$SH_OVERRIDE_SRC" ]]; then
@@ -161,9 +134,11 @@ install_override() {
 main() {
   require_root
   command -v systemctl >/dev/null 2>&1 || die "systemd is required"
+  # shellcheck disable=SC1091
+  [[ -f "$LIB_SH" ]] && source "$LIB_SH" || die "missing lib: $LIB_SH"
 
   local name device mixer iface
-  name="${AIRPLAY_NAME:-Wyse DAC}"
+  name="${AIRPLAY_NAME:-}"
   mixer="${ALSA_MIXER:-}"
   iface="${AVAHI_IFACE:-}"
   local hwaddr="${HW_ADDR:-}"
@@ -179,6 +154,7 @@ main() {
   fi
 
   log "ensuring AirPlay 2 stack (shairport-sync + nqptp)"
+  ensure_pkg jq || true
   ensure_nqptp
   ensure_shairport_ap2
 
@@ -186,13 +162,22 @@ main() {
   install_override
   ensure_execstart_for_local_build
 
-  # Derive hardware address from iface if not explicitly provided
-  if [[ -z "$hwaddr" && -n "${iface:-}" ]]; then
-    hwaddr=$(cat "/sys/class/net/$iface/address" 2>/dev/null | head -n1 || true)
+  # Resolve defaults for iface/hwaddr and default, unique name
+  local primary_if mac
+  primary_if="${iface:-$(primary_iface || true)}"
+  if [[ -z "$hwaddr" ]]; then
+    mac=$(derive_hwaddr_from_iface "$primary_if" || true)
+    hwaddr="$mac"
+  fi
+  if [[ -z "$name" ]]; then
+    name="$(default_airplay_name "${hwaddr:-}")"
   fi
 
   log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'}${hwaddr:+, hwaddr='$hwaddr'})"
   render_conf "$name" "$device" "${mixer:-}" "${iface:-}" "${hwaddr:-}"
+
+  # Self-heal identity on first-run or when image was cloned
+  maybe_reset_identity "${hwaddr:-}"
 
   log "enabling and starting services"
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"
