@@ -65,15 +65,17 @@ main() {
       device="hw:0,0"
     fi
   fi
-  if [[ -z "$hwaddr" ]]; then
-    hwaddr="$mac"
-  fi
-
   # Self-heal identity if this looks like a cloned image
-  maybe_reset_identity "$hwaddr"
+  maybe_reset_identity "$mac"
 
-  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'}${hwaddr:+, hwaddr='$hwaddr'})"
-  render_conf "$name" "$device" "${mixer:-}" "${iface:-}" "${hwaddr:-}"
+  log "writing $TARGET_CONF (name='$name', device='$device')"
+  # identity-ensure manages interface and hardware_address at boot
+  render_conf "$name" "$device" "${mixer:-}" "" ""
+
+  # Ensure identity fields are present immediately (not just on next boot)
+  if [[ -x "/usr/local/libexec/airplay_wyse/identity-ensure" ]]; then
+    /usr/local/libexec/airplay_wyse/identity-ensure || die "identity-ensure failed; refusing to restart shairport-sync"
+  fi
 
   log "restarting shairport-sync"
   systemctl restart shairport-sync.service

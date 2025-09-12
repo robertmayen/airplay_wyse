@@ -3,8 +3,7 @@
 general = {
   name = "{{AIRPLAY_NAME}}";
   mdns_backend = "avahi";
-  interface = "{{AVAHI_IFACE}}"; // optional; removed if unset
-  hardware_address = "{{HW_ADDR}}"; // optional; removed if unset
+  // interface and hardware_address are managed by identity-ensure at boot.
 };
 
 alsa = {

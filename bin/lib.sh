@@ -45,6 +45,53 @@ derive_hwaddr_from_iface() {
   cat "/sys/class/net/$iface/address" 2>/dev/null | head -n1 || true
 }
 
+state_dir_from_systemd() {
+  if command -v systemctl >/dev/null 2>&1; then
+    local sd
+    sd=$(systemctl show -p StateDirectory shairport-sync 2>/dev/null | awk -F= '/StateDirectory=/{print $2}')
+    if [[ -n "$sd" ]]; then
+      case "$sd" in
+        /*) echo "$sd" ;;
+        *) echo "/var/lib/$sd" ;;
+      esac
+    fi
+  fi
+}
+
+shairport_state_dirs() {
+  # Echo candidate state directories, one per line, first the most likely
+  local sd
+  sd=$(state_dir_from_systemd || true)
+  if [[ -n "$sd" ]]; then echo "$sd"; fi
+  echo "/var/lib/shairport-sync"
+  echo "/var/cache/shairport-sync"
+  echo "/var/lib/shairport"
+  echo "/var/cache/shairport"
+}
+
+clear_shairport_state() {
+  # Stop service then clear likely state dirs; tolerant if absent
+  systemctl stop shairport-sync.service >/dev/null 2>&1 || true
+  local d
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    rm -rf "$d"/* 2>/dev/null || true
+  done < <(shairport_state_dirs)
+  # Also try service user's XDG directories if any
+  if command -v systemctl >/dev/null 2>&1; then
+    local sv_user homedir
+    sv_user=$(systemctl show -p User shairport-sync 2>/dev/null | awk -F= '/User=/{print $2}')
+    if [[ -n "$sv_user" ]]; then
+      homedir=$(getent passwd "$sv_user" 2>/dev/null | awk -F: '{print $6}')
+      if [[ -n "$homedir" && -d "$homedir" ]]; then
+        rm -rf "$homedir/.config/shairport-sync" 2>/dev/null || true
+        rm -rf "$homedir/.local/share/shairport-sync" 2>/dev/null || true
+        rm -rf "$homedir/.cache/shairport-sync" 2>/dev/null || true
+      fi
+    fi
+  fi
+}
+
 primary_iface() {
   if command -v ip >/dev/null 2>&1; then
     ip route 2>/dev/null | awk '/^default/ {print $5; exit}'
@@ -72,35 +119,32 @@ ensure_state_dir() {
 
 maybe_reset_identity() {
   # Reset shairport AirPlay 2 identity if this looks like a cloned image
-  # Uses fingerprint of machine-id and MAC. Only resets when fingerprint absent or changed.
+  # Uses fingerprint of machine-id, hostname and MAC. Only resets when fingerprint absent or changed.
   local mac="$1"
-  local machine_id fp current_fp
+  local machine_id host fp current_fp
   machine_id=$(cat /etc/machine-id 2>/dev/null || true)
-  fp="${machine_id}|${mac}"
+  host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)
+  fp="${machine_id}|${host}|${mac}"
 
   ensure_state_dir
 
   if [[ ! -f "$IDENTITY_FILE" ]]; then
     # First-time initialization: clear any pre-populated identity from image
-    if [[ -d /var/lib/shairport-sync ]]; then
-      echo "[lib] initializing identity (clearing shairport-sync state)" >&2
-      systemctl stop shairport-sync.service >/dev/null 2>&1 || true
-      rm -rf /var/lib/shairport-sync/* 2>/dev/null || true
-    fi
-    printf '{"machine_id":"%s","mac":"%s","created":"%s"}\n' "$machine_id" "$mac" "$(ts)" >"$IDENTITY_FILE"
+    echo "[lib] initializing identity (clearing shairport state)" >&2
+    clear_shairport_state
+    printf '{"machine_id":"%s","host":"%s","mac":"%s","created":"%s"}\n' "$machine_id" "$host" "$mac" "$(ts)" >"$IDENTITY_FILE"
     return 0
   fi
 
   if command -v jq >/dev/null 2>&1; then
-    current_fp=$(jq -r '(.machine_id+"|"+.mac) // empty' "$IDENTITY_FILE" 2>/dev/null || true)
+    current_fp=$(jq -r '((.machine_id//empty)+"|"+(.host//empty)+"|"+(.mac//empty)) // empty' "$IDENTITY_FILE" 2>/dev/null || true)
   else
     # Fallback: parse JSON with awk/sed (best-effort)
-    current_fp=$(awk -F'"' '/"machine_id"/{mid=$4} /"mac"/{mac=$4} END{if(mid!="" && mac!="") print mid"|"mac}' "$IDENTITY_FILE" 2>/dev/null || true)
+    current_fp=$(awk -F'"' '/"machine_id"/{mid=$4} /"host"/{h=$4} /"mac"/{mac=$4} END{if(mid!="" && mac!="") print mid"|"h"|"mac}' "$IDENTITY_FILE" 2>/dev/null || true)
   fi
   if [[ "$current_fp" != "$fp" && -n "$fp" ]]; then
     echo "[lib] identity fingerprint changed; resetting shairport identity" >&2
-    systemctl stop shairport-sync.service >/dev/null 2>&1 || true
-    rm -rf /var/lib/shairport-sync/* 2>/dev/null || true
-    printf '{"machine_id":"%s","mac":"%s","updated":"%s"}\n' "$machine_id" "$mac" "$(ts)" >"$IDENTITY_FILE"
+    clear_shairport_state
+    printf '{"machine_id":"%s","host":"%s","mac":"%s","updated":"%s"}\n' "$machine_id" "$host" "$mac" "$(ts)" >"$IDENTITY_FILE"
   fi
 }

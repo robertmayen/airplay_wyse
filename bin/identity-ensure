@@ -3,13 +3,17 @@ set -euo pipefail
 
 # Ensure unique AirPlay 2 identity and sane defaults before shairport starts.
 # - Resets copied AP2 state on first-run or fingerprint change
-# - Ensures hardware_address is set from active NIC to avoid RAOP collisions
+# - Ensures hardware_address is set (real or synthetic) to avoid RAOP collisions
 # - Ensures a unique default name (Wyse DAC-<MACSUFFIX>) if name is generic
+# - Sets interface coherently and validates non-zero deviceid
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LIB_SH="$REPO_DIR/bin/lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+LIB_SH="$SCRIPT_DIR/lib.sh"
 CONF="/etc/shairport-sync.conf"
+DEFAULTS_FILE="/etc/default/airplay_wyse"
+
+# shellcheck disable=SC1091
+[[ -f "$DEFAULTS_FILE" ]] && source "$DEFAULTS_FILE" || true
 
 # shellcheck disable=SC1091
 [[ -f "$LIB_SH" ]] && source "$LIB_SH" || { echo "[identity] missing lib: $LIB_SH" >&2; exit 0; }
@@ -17,6 +21,7 @@ CONF="/etc/shairport-sync.conf"
 log() { echo "$(ts) [identity] $*"; }
 
 FORCE=0
+NETWORK_WAIT_SECS=${AIRPLAY_WYSE_WAIT_SECS:-10}
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -24,7 +29,7 @@ parse_args() {
       --force) FORCE=1 ;;
       -h|--help)
 cat <<'EOF'
-Usage: ./bin/identity-ensure [--force]
+Usage: identity-ensure [--force]
 Ensures unique AirPlay 2 identity and sane defaults.
   --force   Reset identity unconditionally (clears /var/lib/shairport-sync)
 EOF
@@ -39,8 +44,7 @@ EOF
 force_reset_identity() {
   local mac="$1"
   log "force-resetting shairport identity"
-  systemctl stop shairport-sync.service >/dev/null 2>&1 || true
-  rm -rf /var/lib/shairport-sync/* 2>/dev/null || true
+  clear_shairport_state
   ensure_state_dir
   local machine_id
   machine_id=$(cat /etc/machine-id 2>/dev/null || true)
@@ -58,7 +62,7 @@ set_conf_value() {
     if grep -qiE "^[[:space:]]*$key[[:space:]]*=" "$CONF" 2>/dev/null; then
         sed -i -E "s|(^[[:space:]]*$key[[:space:]]*=[[:space:]]*\").*(\"[[:space:]]*;)|\\1$val\\2|I" "$CONF"
     else
-        # Append in appropriate section: general for name/hardware_address
+        # Append in appropriate section: general for known keys
         if [[ "$key" == "name" || "$key" == "hardware_address" || "$key" == "interface" ]]; then
             awk -v k="$key" -v v="$val" '
                 BEGIN { done=0 }
@@ -85,35 +89,123 @@ set_conf_value() {
     fi
 }
 
+normalize_mac() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+mac_is_zero() {
+  local m
+  m="$(normalize_mac "$1")"
+  [[ "$m" =~ ^00:00:00:00:00:00$ ]]
+}
+
+choose_primary_iface() {
+  # Priority: env override -> default route -> first UP with carrier -> first non-loopback UP
+  local override="${AIRPLAY_WYSE_IFACE:-${AVAHI_IFACE:-}}"
+  if [[ -n "$override" && -d "/sys/class/net/$override" ]]; then
+    echo "$override"; return 0
+  fi
+  if command -v ip >/dev/null 2>&1; then
+    local def
+    def=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')
+    if [[ -n "$def" && -d "/sys/class/net/$def" ]]; then echo "$def"; return 0; fi
+  fi
+  local i
+  for i in /sys/class/net/*; do
+    i=$(basename "$i")
+    [[ "$i" == "lo" ]] && continue
+    [[ -f "/sys/class/net/$i/operstate" && $(cat "/sys/class/net/$i/operstate" 2>/dev/null) == up ]] || continue
+    if [[ -f "/sys/class/net/$i/carrier" && $(cat "/sys/class/net/$i/carrier" 2>/dev/null) == 1 ]]; then
+      echo "$i"; return 0
+    fi
+  done
+  for i in /sys/class/net/*; do
+    i=$(basename "$i")
+    [[ "$i" == "lo" ]] && continue
+    [[ -f "/sys/class/net/$i/operstate" && $(cat "/sys/class/net/$i/operstate" 2>/dev/null) == up ]] || continue
+    echo "$i"; return 0
+  done
+  return 1
+}
+
+read_mac_from_iface() {
+  local iface="$1"
+  [[ -n "$iface" && -f "/sys/class/net/$iface/address" ]] || { echo ""; return 0; }
+  cat "/sys/class/net/$iface/address" 2>/dev/null | tr '[:upper:]' '[:lower:]' | head -n1
+}
+
+synthetic_mac_from_machine_id() {
+  local mid hash hex first rest byte0
+  mid=$(cat /etc/machine-id 2>/dev/null || true)
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$mid" | sha256sum | awk '{print $1}')
+  else
+    hash=$(printf '%s' "$mid" | shasum -a 256 | awk '{print $1}')
+  fi
+  hex=${hash:0:12}
+  first=${hex:0:2}
+  rest=${hex:2}
+  # Set locally-administered (bit1) and clear multicast (bit0)
+  byte0=$(( 0x$first ))
+  byte0=$(( (byte0 | 0x02) & 0xFE ))
+  printf '%02x:%s\n' "$byte0" "$(echo "$rest" | sed -E 's/.{2}/&:/g; s/:$//')"
+}
+
 main() {
   parse_args "$@"
-  # Derive active interface/MAC
-  local iface mac name cur_name cur_hwaddr
-  iface="${AVAHI_IFACE:-$(primary_iface || true)}"
-  mac="${HW_ADDR:-$(derive_hwaddr_from_iface "$iface" || true)}"
-  cur_name=$(read_conf_value name || true)
-  cur_hwaddr=$(read_conf_value hardware_address || true)
+  # Derive interface with bounded wait
+  local iface mac name cur_name cur_hwaddr tries=0
+  iface="$(choose_primary_iface || true)"
+  while [[ -z "${iface:-}" && $tries -lt $NETWORK_WAIT_SECS ]]; do
+    sleep 1; tries=$((tries+1)); iface="$(choose_primary_iface || true)"
+  done
+  if [[ -n "${iface:-}" ]]; then
+    set_conf_value interface "$iface"
+  else
+    log "no primary interface detected; proceeding without interface binding"
+  fi
+
+  # Read MAC with retry, else synthesize from machine-id
+  tries=0
+  mac="${HW_ADDR:-$(read_mac_from_iface "${iface:-}" || true)}"
+  while { [[ -z "${mac:-}" ]] || mac_is_zero "$mac"; } && [[ $tries -lt $NETWORK_WAIT_SECS ]]; do
+    sleep 1; tries=$((tries+1)); mac="${HW_ADDR:-$(read_mac_from_iface "${iface:-}" || true)}"
+  done
+  if [[ -z "${mac:-}" || mac_is_zero "$mac" ]]; then
+    mac="$(synthetic_mac_from_machine_id)"
+    log "using synthetic deviceid $mac (no real MAC available)"
+  fi
 
   # Ensure config has a hardware_address; avoid all-zero RAOP ids
-  if [[ -z "${cur_hwaddr:-}" || "$cur_hwaddr" =~ ^0{2}:0{2}:0{2}:0{2}:0{2}:0{2}$ ]]; then
-    if [[ -n "${mac:-}" ]]; then
-      log "setting hardware_address to $mac"
-      set_conf_value hardware_address "$mac"
-    fi
+  cur_hwaddr=$(read_conf_value hardware_address || true)
+  if [[ -z "${cur_hwaddr:-}" || mac_is_zero "$cur_hwaddr" || "$cur_hwaddr" != "$(echo "$mac" | tr '[:upper:]' '[:lower:]')" ]]; then
+    log "setting hardware_address to $mac"
+    set_conf_value hardware_address "$(echo "$mac" | tr '[:upper:]' '[:lower:]')"
   fi
 
   # Ensure a unique default name if name missing or generic
+  cur_name=$(read_conf_value name || true)
   if [[ -z "${cur_name:-}" || "$cur_name" =~ ^Wyse[[:space:]]+DAC$ ]]; then
     name="$(default_airplay_name "${mac:-}")"
     log "setting default name to $name"
     set_conf_value name "$name"
   fi
 
+  # Optional multi-instance offset (document-only; not modified here)
+
   # Reset identity (forced or fingerprint-based)
   if [[ $FORCE -eq 1 ]]; then
     force_reset_identity "${mac:-}"
   else
     maybe_reset_identity "${mac:-}"
+  fi
+
+  # Lint: ensure non-zero deviceid
+  local post_mac
+  post_mac=$(read_conf_value hardware_address || true)
+  if [[ -z "${post_mac:-}" || "$post_mac" =~ ^0{2}:0{2}:0{2}:0{2}:0{2}:0{2}$ ]]; then
+    log "hardware_address is empty or zero in config"
+    exit 1
   fi
 }
 

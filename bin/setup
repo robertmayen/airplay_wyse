@@ -17,6 +17,10 @@ SH_OVERRIDE_DIR="/etc/systemd/system/shairport-sync.service.d"
 SH_OVERRIDE_DEST="$SH_OVERRIDE_DIR/override.conf"
 IDENTITY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-identity.service"
 IDENTITY_UNIT_DEST="/etc/systemd/system/airplay-wyse-identity.service"
+IDENTITY_LIBEXEC_DIR="/usr/local/libexec/airplay_wyse"
+IDENTITY_BIN_SRC="$REPO_DIR/bin/identity-ensure"
+IDENTITY_LIB_SRC="$REPO_DIR/bin/lib.sh"
+DEFAULT_ENV_FILE="/etc/default/airplay_wyse"
 LIB_SH="$REPO_DIR/bin/lib.sh"
 
 log() { echo "$(ts) [setup] $*"; }
@@ -140,6 +144,20 @@ install_identity_unit() {
   fi
 }
 
+install_identity_program() {
+  install -d -m 0755 "$IDENTITY_LIBEXEC_DIR"
+  install -m 0755 "$IDENTITY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/identity-ensure"
+  install -m 0644 "$IDENTITY_LIB_SRC" "$IDENTITY_LIBEXEC_DIR/lib.sh"
+  # Optional environment override file for interface selection, etc.
+  if [[ ! -f "$DEFAULT_ENV_FILE" ]]; then
+    cat >"$DEFAULT_ENV_FILE" <<'EOF'
+# airplay_wyse defaults (sourced by identity-ensure)
+# Set AIRPLAY_WYSE_IFACE=eth0 (for example) to force the primary interface.
+# Set AIRPLAY_WYSE_INSTANCE_OFFSET=1 if running multiple shairport instances.
+EOF
+  fi
+}
+
 main() {
   require_root
   command -v systemctl >/dev/null 2>&1 || die "systemd is required"
@@ -171,25 +189,28 @@ main() {
   install_override
   ensure_execstart_for_local_build
 
-  log "installing identity ensure unit"
+  log "installing identity program + unit"
+  install_identity_program
   install_identity_unit
 
-  # Resolve defaults for iface/hwaddr and default, unique name
+  # Resolve defaults for device name (unique default). hardware_address/interface are managed by identity-ensure
   local primary_if mac
   primary_if="${iface:-$(primary_iface || true)}"
-  if [[ -z "$hwaddr" ]]; then
-    mac=$(derive_hwaddr_from_iface "$primary_if" || true)
-    hwaddr="$mac"
-  fi
   if [[ -z "$name" ]]; then
-    name="$(default_airplay_name "${hwaddr:-}")"
+    mac=$(derive_hwaddr_from_iface "$primary_if" || true)
+    name="$(default_airplay_name "${mac:-}")"
   fi
 
-  log "writing $TARGET_CONF (name='$name', device='$device'${iface:+, iface='$iface'}${hwaddr:+, hwaddr='$hwaddr'})"
-  render_conf "$name" "$device" "${mixer:-}" "${iface:-}" "${hwaddr:-}"
+  log "writing $TARGET_CONF (name='$name', device='$device')"
+  # identity-ensure will set interface and hardware_address at boot
+  render_conf "$name" "$device" "${mixer:-}" "" ""
 
-  # Self-heal identity on first-run or when image was cloned
-  maybe_reset_identity "${hwaddr:-}"
+  # Ensure identity is set immediately (and self-heal on clones)
+  if [[ -x "$IDENTITY_LIBEXEC_DIR/identity-ensure" ]]; then
+    "$IDENTITY_LIBEXEC_DIR/identity-ensure" || die "identity-ensure failed"
+  else
+    maybe_reset_identity "${mac:-}"
+  fi
 
   log "enabling and starting services"
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"

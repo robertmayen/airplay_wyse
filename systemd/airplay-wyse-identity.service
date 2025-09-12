@@ -1,13 +1,15 @@
 [Unit]
 Description=AirPlay Wyse Identity Ensure
 Documentation=https://github.com/robertmayen/airplay_wyse
+Wants=network-online.target
+After=network-online.target
 Before=shairport-sync.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/airplay_wyse/bin/identity-ensure
+ExecStart=/usr/local/libexec/airplay_wyse/identity-ensure
 RemainAfterExit=yes
+ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/identity-ensure
 
 [Install]
 WantedBy=multi-user.target
-

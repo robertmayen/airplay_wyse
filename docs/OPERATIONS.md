@@ -39,7 +39,20 @@ You can also set environment variables when running `setup`/`apply`:
 If `AVAHI_IFACE` is set and `HW_ADDR` is not, the hardware address is derived from the interface.
 
 Identity management
-- Identity self-heals automatically: a one-shot unit (`airplay-wyse-identity.service`) runs before `shairport-sync` to ensure a unique hardware_address, a unique default name, and to reset copied AirPlay 2 identity on first-run or fingerprint change. Fingerprint is `(machine-id|MAC)`, state at `/var/lib/airplay_wyse/instance.json`.
+- Identity self-heals automatically: a one-shot unit (`airplay-wyse-identity.service`) runs before `shairport-sync` (and after the network is online) to ensure:
+  - A non-zero device identity: sets `hardware_address` from the primary LAN interface. If no real MAC is readable, it synthesizes a stable locally-administered MAC from `/etc/machine-id` (sets LAA bit, clears multicast) to avoid the known all-zero RAOP failure.
+  - A unique default name (Wyse DAC-<MACSUFFIX>) if the name is generic or missing.
+  - Cloned images are reset safely: on first-run or when the host fingerprint changes, it purges Shairport’s AP2 state so a fresh keypair is generated on next start.
+  - Fingerprint includes `machine-id`, hostname and MAC; state recorded at `/var/lib/airplay_wyse/instance.json`.
+
+Interface override and timing
+- The identity step chooses the primary interface deterministically: env override `AIRPLAY_WYSE_IFACE` (or `/etc/default/airplay_wyse`) → default route NIC → first UP with carrier → first UP non‑loopback. It waits up to 10s for an interface to appear before synthesizing a fallback device identity.
+
+Notes on MAC randomization
+- If NetworkManager MAC randomization is enabled, the broadcast MAC may change between boots. For AirPlay receivers, prefer a permanent/stable MAC policy on the receiver NIC to keep identity stable. The identity step will still provide a stable synthetic fallback if a real MAC is unavailable.
+
+Verification
+- Use `./bin/verify-airplay-identity` to validate the local AirPlay identity. It fails if `_airplay._tcp` TXT `pk` is missing or if `deviceid` is zero; prints a one‑line summary.
 
 ## Optional Host Inventory
 For environments with multiple similar hosts, `bin/alsa-probe` continues to honor optional hints at `inventory/hosts/<short-hostname>.yml`:

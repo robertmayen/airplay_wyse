@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# verify-airplay-identity: developer convenience script
+# - Dumps local _airplay._tcp and _raop._tcp TXT
+# - Fails if pk missing or deviceid is zero
+# - Prints one-line summary: <host> pk=<first8> deviceid=<MAC> iface=<iface>
+
+host_short() { hostname -s 2>/dev/null || hostname; }
+
+find_iface() {
+  local conf="/etc/shairport-sync.conf" iface
+  iface=$(awk 'BEGIN{IGNORECASE=1} /interface[[:space:]]*=/ {match($0, /=[[:space:]]*"[^"]+"/); if (RSTART>0) {v=substr($0, RSTART+2, RLENGTH-2); gsub(/^[ \t\"]+|[ \t\"]+$/, "", v); print v; exit}}' "$conf" 2>/dev/null || true)
+  if [[ -n "$iface" ]]; then echo "$iface"; return 0; fi
+  if command -v ip >/dev/null 2>&1; then
+    ip route 2>/dev/null | awk '/^default/ {print $5; exit}'
+  fi
+}
+
+avahi_dump() {
+  local type="$1"
+  timeout 8 avahi-browse -rt "$type" 2>/dev/null || true
+}
+
+extract_for_host() {
+  local type="$1" h="$2";
+  avahi_dump "$type" | awk -v h="${h,,}" 'BEGIN{s=0} tolower($0)~h{ s=1 } s && /txt/ {print} s && /^=/ {print; s=0}'
+}
+
+main() {
+  local h iface a_txt r_txt pk deviceid rc=0
+  h="$(host_short)"
+  iface="$(find_iface || true)"
+  if ! command -v avahi-browse >/dev/null 2>&1; then
+    echo "avahi-browse not available" >&2
+    exit 2
+  fi
+  a_txt=$(extract_for_host _airplay._tcp "$h" | tr -d '\r')
+  r_txt=$(extract_for_host _raop._tcp "$h" | tr -d '\r')
+  pk=$(echo "$a_txt" | grep -Eo 'pk=[0-9a-f]+' | head -n1 | cut -d= -f2 || true)
+  deviceid=$( (echo "$a_txt"; echo "$r_txt") | grep -Eio 'deviceid=[0-9a-f:]{17}' | head -n1 | cut -d= -f2 || true)
+  if [[ -z "${pk:-}" ]]; then
+    echo "ERROR: pk missing in _airplay._tcp TXT for host '$h'" >&2
+    rc=1
+  fi
+  if [[ -z "${deviceid:-}" || "$deviceid" =~ ^00:00:00:00:00:00$ ]]; then
+    echo "ERROR: deviceid is zero or missing for host '$h'" >&2
+    rc=1
+  fi
+  local pkshort
+  pkshort="${pk:0:8}"
+  echo "${h} pk=${pkshort} deviceid=${deviceid} iface=${iface:-unknown}"
+  exit $rc
+}
+
+main "$@"
+
