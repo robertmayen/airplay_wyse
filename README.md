@@ -19,6 +19,16 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for:
 - Health monitoring
 - Troubleshooting
 
+Fast path (manual)
+- Create an inventory file with your host shortname and NIC:
+  - `inventory/hosts/<short-hostname>.yml`:
+    - `airplay_name: "Wyse DAC"`
+    - `nic: <your_iface>` (e.g., `wlp0s12f0`)
+- Run converge as root to install packages and render configs:
+  - `sudo /opt/airplay_wyse/bin/converge`
+- Verify advertisement:
+  - `avahi-browse -rt _airplay._tcp` should show your device name
+
 ## Requirements
 
 - Debian-based system (tested on Debian 13)

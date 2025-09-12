@@ -170,10 +170,13 @@ load_inventory() {
 }
 
 yaml_get() {
-  # very small helper to extract simple key: value (no nesting beyond one dot)
+  # Extract simple key: value from YAML (supports leading spaces and quotes)
+  # Returns the first match of the exact key at the current indentation level.
   local key="$1"
   if [[ -n "${INVENTORY_FILE:-}" && -f "$INVENTORY_FILE" ]]; then
-    grep -E "^${key}:[[:space:]]" "$INVENTORY_FILE" | sed -E "s/^${key}:[[:space:]]*//" | tr -d '"'
+    grep -E "^[[:space:]]*${key}[[:space:]]*:[[:space:]]*" "$INVENTORY_FILE" | \
+      sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//; s/^[\"']|[\"']$//g" | \
+      head -n1
   else
     echo ""
   fi
@@ -215,6 +218,8 @@ render_template() {
   if grep -q '{{' "$tmp" 2>/dev/null; then
     log "WARN: template placeholders unresolved in $src; skipping install"
     rm -f "$tmp"
+    # Ensure destination is not left as an empty or stale file
+    [[ -n "$dst" ]] && rm -f "$dst" 2>/dev/null || true
     return 0
   fi
   # Write rendered file to a temp path owned by airplay; a root copy, if needed, must be enqueued externally.
@@ -438,6 +443,11 @@ apply_configs() {
   # shairport-sync (render into tmp and request a restart via transient unit if needed)
   local tmp_ss; tmp_ss=$(mktemp -p "$TMPDIR")
   render_template "$REPO_DIR/cfg/shairport-sync.conf.tmpl" "$tmp_ss"
+  # Bail out if template was not rendered (e.g., placeholders unresolved)
+  if [[ ! -s "$tmp_ss" ]] || grep -q '{{' "$tmp_ss" 2>/dev/null; then
+    rm -f "$tmp_ss"
+    log "WARN: shairport-sync.conf not rendered; skipping install"
+  else
   if [[ -z "${ALSA_MIXER:-}" ]]; then
     # Remove mixer_control_name line without using in-place sed (seccomp-friendly)
     local tmp2; tmp2=$(mktemp -p "$TMPDIR")
@@ -451,12 +461,17 @@ apply_configs() {
     systemctl restart shairport-sync.service || true
   fi
   rm -f "$tmp_ss"
+  fi
 
   # avahi iface restrict (optional)
   if [[ -f "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" ]]; then
     # Render to temp; copy + restart handled via broker if policy later allows.
     local tmp_av; tmp_av=$(mktemp -p "$TMPDIR")
     render_template "$REPO_DIR/cfg/avahi/avahi-daemon.conf.d/airplay-wyse.conf.tmpl" "$tmp_av"
+    if [[ ! -s "$tmp_av" ]] || grep -q '{{' "$tmp_av" 2>/dev/null; then
+      rm -f "$tmp_av"
+      log "WARN: avahi drop-in not rendered; skipping install"
+    else
     if [[ ! -d "/etc/avahi/avahi-daemon.conf.d" ]]; then
       install -d -m 0755 /etc/avahi/avahi-daemon.conf.d
       changed=1
@@ -467,6 +482,7 @@ apply_configs() {
       systemctl restart avahi-daemon.service || true
     fi
     rm -f "$tmp_av"
+    fi
   fi
 
   return $changed
@@ -521,6 +537,11 @@ check_avahi_raop() {
 }
 
 converge_main() {
+  # Require root to ensure we can install configs and manage services
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    echo "converge must be run as root (use sudo)" >&2
+    exit 1
+  fi
   ensure_dirs
 
   # Root-run model: no systemd-run dependency

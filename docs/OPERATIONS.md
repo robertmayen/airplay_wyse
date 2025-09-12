@@ -14,6 +14,16 @@ This document describes the operational workflow for running a Wyse 5070 + USB D
   - Copy overrides: `systemd/overrides/*/` to `/etc/systemd/system/`.
   - `systemctl daemon-reload && systemctl enable --now reconcile.timer`.
 
+Important
+- Run `bin/converge` as root (`sudo`) — it writes to `/etc` and manages services.
+- Inventory YAML must be left-aligned keys (no leading spaces):
+  ```yaml
+  airplay_name: "Wyse DAC"
+  nic: wlp0s12f0
+  ```
+  File path: `/opt/airplay_wyse/inventory/hosts/<short-hostname>.yml`.
+  The `<short-hostname>` is from `hostname -s`.
+
 ## Inventory (Optional)
 `inventory/hosts/<short-hostname>.yml`:
 ```yaml
@@ -32,6 +42,11 @@ alsa:
 3. Push: `git push origin main v1.0.0`.
 4. Devices fetch and converge on the next timer tick.
 
+Fixing device update errors (403)
+- If `reconcile` logs show a 403 when fetching origin, update the remote URL on the device to a readable endpoint (e.g., a public HTTPS URL), or disable the timer until fixed:
+  - `cd /opt/airplay_wyse && sudo git remote set-url origin https://github.com/<user>/airplay_wyse.git`
+  - or `sudo systemctl disable --now reconcile.timer`
+
 ## Health & Troubleshooting
 - Health JSON: `/var/lib/airplay_wyse/last-health.json`.
 - Quick view: `./bin/health` (read-only viewer; prints JSON and quick probes; does not modify state).
@@ -46,6 +61,11 @@ alsa:
 - Verify AirPlay 2 capability: `shairport-sync -V | grep -q "AirPlay2"`.
 - Verify nqptp active: `systemctl is-active nqptp`.
 - Verify advertisement: `avahi-browse -rt _airplay._tcp`.
+
+If your device does not appear
+- Ensure `/etc/shairport-sync.conf` has no `{{...}}` placeholders.
+- Ensure `/etc/avahi/avahi-daemon.conf.d/airplay-wyse.conf` shows `allow-interfaces=<your_iface>` or delete the drop-in and restart Avahi.
+- Run `sudo /opt/airplay_wyse/bin/converge` again to render configs from inventory.
 
 ## Notes
 - Converge installs packages via APT (no on-device compilation). Units enforce `ProtectSystem=strict` and allow writes only to:
