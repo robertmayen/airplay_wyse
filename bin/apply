@@ -10,6 +10,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE_MIN="$REPO_DIR/cfg/shairport-sync.minimal.conf.tmpl"
 TARGET_CONF="/etc/shairport-sync.conf"
 LIB_SH="$REPO_DIR/bin/lib.sh"
+DEFAULTS_FILE=${DEFAULTS_FILE:-/etc/default/airplay_wyse}
 
 log() { echo "$(ts) [apply] $*"; }
 die() { echo "[apply] ERROR: $*" >&2; exit 1; }
@@ -84,7 +85,6 @@ main() {
 
   log "restarting shairport-sync"
   systemctl restart shairport-sync.service
-DEFAULTS_FILE="/etc/default/airplay_wyse"
 
   log "done"
 }

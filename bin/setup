@@ -22,6 +22,7 @@ IDENTITY_BIN_SRC="$REPO_DIR/bin/identity-ensure"
 IDENTITY_LIB_SRC="$REPO_DIR/bin/lib.sh"
 DEFAULT_ENV_FILE="/etc/default/airplay_wyse"
 LIB_SH="$REPO_DIR/bin/lib.sh"
+DEFAULTS_FILE=${DEFAULTS_FILE:-/etc/default/airplay_wyse}
 
 log() { echo "$(ts) [setup] $*"; }
 die() { echo "[setup] ERROR: $*" >&2; exit 1; }
@@ -220,7 +221,6 @@ main() {
   log "enabling and starting services"
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"
   systemctl enable --now shairport-sync.service
-DEFAULTS_FILE="/etc/default/airplay_wyse"
 
   log "done"
 }
