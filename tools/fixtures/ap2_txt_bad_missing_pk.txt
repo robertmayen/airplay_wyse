@@ -1,0 +1,5 @@
+=; eth0 IPv4 Wyse DAC-1D9A _airplay._tcp local
+;   TXT records:
+;   deviceid=64:bc:58:fc:1d:9a
+;   features=0x5A7FFFF7,0x1E
+;   srcvers=766.25

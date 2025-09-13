@@ -17,9 +17,12 @@ SH_OVERRIDE_DIR="/etc/systemd/system/shairport-sync.service.d"
 SH_OVERRIDE_DEST="$SH_OVERRIDE_DIR/override.conf"
 IDENTITY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-identity.service"
 IDENTITY_UNIT_DEST="/etc/systemd/system/airplay-wyse-identity.service"
+ADVERTISE_READY_SRC="$REPO_DIR/systemd/airplay-wyse-advertise-ready.service"
+ADVERTISE_READY_DEST="/etc/systemd/system/airplay-wyse-advertise-ready.service"
 IDENTITY_LIBEXEC_DIR="/usr/local/libexec/airplay_wyse"
 IDENTITY_BIN_SRC="$REPO_DIR/bin/identity-ensure"
 IDENTITY_LIB_SRC="$REPO_DIR/bin/lib.sh"
+VERIFY_BIN_SRC="$REPO_DIR/bin/verify-airplay-identity"
 DEFAULT_ENV_FILE="/etc/default/airplay_wyse"
 LIB_SH="$REPO_DIR/bin/lib.sh"
 DEFAULTS_FILE=${DEFAULTS_FILE:-/etc/default/airplay_wyse}
@@ -145,10 +148,21 @@ install_identity_unit() {
   fi
 }
 
+install_advertise_ready_unit() {
+  if [[ -f "$ADVERTISE_READY_SRC" ]]; then
+    install -m 0644 "$ADVERTISE_READY_SRC" "$ADVERTISE_READY_DEST"
+    systemctl daemon-reload
+    systemctl enable --now airplay-wyse-advertise-ready.service || true
+  fi
+}
+
 install_identity_program() {
   install -d -m 0755 "$IDENTITY_LIBEXEC_DIR"
   install -m 0755 "$IDENTITY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/identity-ensure"
   install -m 0644 "$IDENTITY_LIB_SRC" "$IDENTITY_LIBEXEC_DIR/lib.sh"
+  if [[ -f "$VERIFY_BIN_SRC" ]]; then
+    install -m 0755 "$VERIFY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/verify-airplay-identity"
+  fi
   # ALSA preflight checker
   if [[ -f "$REPO_DIR/bin/preflight-alsa" ]]; then
     install -m 0755 "$REPO_DIR/bin/preflight-alsa" "$IDENTITY_LIBEXEC_DIR/preflight-alsa"
@@ -219,6 +233,8 @@ EOF
   ensure_pkg alsa-utils || true
   ensure_nqptp
   ensure_shairport_ap2
+  ensure_pkg avahi-daemon || true
+  systemctl enable --now avahi-daemon.service || true
 
   log "installing shairport-sync override (hardened + nqptp ordering)"
   install_override
@@ -227,6 +243,7 @@ EOF
   log "installing identity program + unit"
   install_identity_program
   install_identity_unit
+  install_advertise_ready_unit
 
   # Resolve defaults for device name (unique default). hardware_address/interface are managed by identity-ensure
   local primary_if mac

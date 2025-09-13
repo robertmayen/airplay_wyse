@@ -1,0 +1,14 @@
+[Unit]
+Description=AirPlay Wyse mDNS identity readiness
+Requires=shairport-sync.service
+After=shairport-sync.service avahi-daemon.service
+Wants=avahi-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/airplay_wyse/verify-airplay-identity --wait 20
+RemainAfterExit=yes
+ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/verify-airplay-identity
+
+[Install]
+WantedBy=multi-user.target

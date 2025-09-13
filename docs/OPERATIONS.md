@@ -78,6 +78,7 @@ Notes on MAC randomization
 - If NetworkManager MAC randomization is enabled, the broadcast MAC may change between boots. For AirPlay receivers, prefer a permanent/stable MAC policy on the receiver NIC to keep identity stable. The identity step will still provide a stable synthetic fallback if a real MAC is unavailable.
 
 Verification
+- Identity & Advertisement: `_airplay._tcp` TXT must include `pk` (hex) and `deviceid` (non‑zero); `_raop._tcp` must be consistent. If missing, shairport may be visible but fail on connect immediately. Recovery: `sudo /usr/local/libexec/airplay_wyse/identity-ensure --force && sudo systemctl restart shairport-sync`. The readiness unit `airplay-wyse-advertise-ready.service` waits up to 20s for valid TXT on boot.
 - Use `./bin/verify-airplay-identity` to validate the local AirPlay identity. It fails if `_airplay._tcp` TXT `pk` is missing or if `deviceid` is zero; prints a one‑line summary.
 
 ## Optional Host Inventory
@@ -130,7 +131,7 @@ Note on NQPTP
   - `sudo sh -c 'echo AIRPLAY_WYSE_DEBUG=1 >> /etc/default/airplay_wyse'`
   - Re-render config: `sudo ./bin/apply`
   - Check: `journalctl -u shairport-sync -n 200 | rg -i "underrun|overrun|xruns|buffer|latency"`
-  - Use `./bin/debug-audio` for a comprehensive diagnostic; it prints `Sink rate OK` when Output FPS is ~44100 and shows active hw_params when on `hw:`.
+  - Use `./bin/debug-audio` for comprehensive diagnostics; identity section highlights missing `pk`/`deviceid` and prints TXT dumps if invalid.
 
 Decision tree (≤10 lines):
 - Output FPS ~47k or preflight fails → you’re on 48k.

@@ -14,6 +14,10 @@ Components
 - Optional inventory hints in `inventory/hosts/<short-hostname>.yml` for ALSA.
  - Identity management in `bin/lib.sh`: derives a unique default name from MAC and self-heals cloned images by resetting AirPlay 2 identity on first-run/fingerprint change. A one-shot unit (`airplay-wyse-identity.service`) enforces this before `shairport-sync` starts.
 
+## Identity & Advertisement
+- Identity oneshot writes a stable, non‑zero deviceid and clears AP2 state on clone to regenerate keys.
+- `_airplay._tcp` TXT must contain `pk` and `deviceid`; `_raop._tcp` must be consistent. A readiness unit waits up to 20s for valid TXT.
+
 ## Clocking & Sample Rate
 - AirPlay is 44.1 kHz; shairport opens the sink at 44100 Hz.
 - Probe picks a 44.1k‑capable `hw:<card>,<dev>` (verified via `/proc/.../hw_params`).

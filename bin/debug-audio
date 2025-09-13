@@ -364,6 +364,10 @@ main() {
   if [[ -x "$(dirname "$0")/verify-airplay-identity" ]]; then
     if ! "$(dirname "$0")/verify-airplay-identity"; then
       warn "Identity check failed; see above"
+      say "Recent _airplay._tcp TXT dump:"
+      avahi-browse -rt _airplay._tcp 2>/dev/null | sed -n '1,120p' || true
+      say "Recent _raop._tcp TXT dump:"
+      avahi-browse -rt _raop._tcp 2>/dev/null | sed -n '1,120p' || true
     fi
   else
     warn "verify-airplay-identity not executable"

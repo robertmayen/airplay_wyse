@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# verify-airplay-identity: developer convenience script
+# verify-airplay-identity: developer convenience script and readiness check
 # - Dumps local _airplay._tcp and _raop._tcp TXT
 # - Fails if pk missing, AP2 deviceid is zero, or _raop instance prefix is zero
 # - Additionally, when an identity reset was detected (instance.json mtime changed),
@@ -30,7 +30,20 @@ avahi_dump() {
 
 extract_for_host() {
   local type="$1" h="$2";
+  if [[ -n "${AP2_TXT_OVERRIDE:-}" && "$type" == "_airplay._tcp" ]]; then
+    cat "$AP2_TXT_OVERRIDE" 2>/dev/null || true; return 0
+  fi
+  if [[ -n "${RAOP_TXT_OVERRIDE:-}" && "$type" == "_raop._tcp" ]]; then
+    cat "$RAOP_TXT_OVERRIDE" 2>/dev/null || true; return 0
+  fi
   avahi_dump "$type" | awk -v h="${h,,}" 'BEGIN{s=0} tolower($0)~h{ s=1 } s && /txt/ {print} s && /^=/ {print; s=0}'
+}
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--wait SECS] [--from-files AP2_TXT RAOP_TXT]
+Checks that _airplay._tcp TXT contains pk (hex) and deviceid (non-zero), and _raop._tcp matches.
+EOF
 }
 
 stat_mtime() {
@@ -83,15 +96,33 @@ EOF
 }
 
 main() {
-  local h iface a_txt r_txt pk deviceid raop_prefix rc=0
+  local h iface a_txt r_txt pk deviceid raop_prefix rc=0 wait_secs=0 from_ap2="" from_raop=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --wait) shift; wait_secs="${1:-0}" ;;
+      --from-files) shift; from_ap2="${1:-}"; shift; from_raop="${1:-}" ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "unknown arg: $1" >&2; exit 2 ;;
+    esac; shift || true
+  done
+  if [[ -n "$from_ap2" && -n "$from_raop" ]]; then
+    AP2_TXT_OVERRIDE="$from_ap2" RAOP_TXT_OVERRIDE="$from_raop" export AP2_TXT_OVERRIDE RAOP_TXT_OVERRIDE
+  fi
   h="$(host_short)"
   iface="$(find_iface || true)"
-  if ! command -v avahi-browse >/dev/null 2>&1; then
+  if [[ -z "${AP2_TXT_OVERRIDE:-}" && -z "${RAOP_TXT_OVERRIDE:-}" ]] && ! command -v avahi-browse >/dev/null 2>&1; then
     echo "avahi-browse not available" >&2
     exit 2
   fi
-  a_txt=$(extract_for_host _airplay._tcp "$h" | tr -d '\r')
-  r_txt=$(extract_for_host _raop._tcp "$h" | tr -d '\r')
+  # Optional wait for Avahi TXT
+  local attempts=0 max_attempts
+  max_attempts=$(( wait_secs>0 ? wait_secs : 1 ))
+  while :; do
+    a_txt=$(extract_for_host _airplay._tcp "$h" | tr -d '\r')
+    r_txt=$(extract_for_host _raop._tcp "$h" | tr -d '\r')
+    if [[ -n "$a_txt" || $attempts -ge $((max_attempts-1)) ]]; then break; fi
+    sleep 1; attempts=$((attempts+1))
+  done
   pk=$(echo "$a_txt" | grep -Eo 'pk=[0-9a-f]+' | head -n1 | cut -d= -f2 || true)
   deviceid=$( (echo "$a_txt"; echo "$r_txt") | grep -Eio 'deviceid=[0-9a-f:]{17}' | head -n1 | cut -d= -f2 || true)
   # Extract RAOP instance 12-hex prefix: lines look like "= ... 001122334455@Name _raop._tcp ..."

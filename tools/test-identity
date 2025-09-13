@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+pass() { echo "PASS: $*"; }
+fail() { echo "FAIL: $*"; exit 1; }
+
+main() {
+  local good bad1 bad2
+  good="$REPO_DIR/tools/fixtures/ap2_txt_good.txt"
+  bad1="$REPO_DIR/tools/fixtures/ap2_txt_bad_missing_pk.txt"
+  bad2="$REPO_DIR/tools/fixtures/ap2_txt_bad_deviceid_zero.txt"
+
+  [[ -f "$good" && -f "$bad1" && -f "$bad2" ]] || fail "fixtures missing"
+
+  if "$REPO_DIR/bin/verify-airplay-identity" --from-files "$good" "$good" >/dev/null; then
+    pass "good AP2 TXT passes"
+  else
+    fail "good AP2 TXT should pass"
+  fi
+
+  if "$REPO_DIR/bin/verify-airplay-identity" --from-files "$bad1" "$good" >/dev/null 2>&1; then
+    fail "missing pk should fail"
+  else
+    pass "missing pk fails as expected"
+  fi
+
+  if "$REPO_DIR/bin/verify-airplay-identity" --from-files "$bad2" "$good" >/dev/null 2>&1; then
+    fail "zero deviceid should fail"
+  else
+    pass "zero deviceid fails as expected"
+  fi
+}
+
+main "$@"
+
