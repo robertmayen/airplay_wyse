@@ -123,13 +123,13 @@ main() {
     if [[ -n "$a_txt" || $attempts -ge $((max_attempts-1)) ]]; then break; fi
     sleep 1; attempts=$((attempts+1))
   done
-  pk=$(echo "$a_txt" | grep -Eo 'pk=[0-9a-f]+' | head -n1 | cut -d= -f2 || true)
+  pk=$(echo "$a_txt" | tr -d '\r' | awk 'tolower($0) ~ /pk=/ { for(i=1;i<=NF;i++){ if(index($i,"pk=")==1){ v=$i; sub(/^pk=/,"",v); gsub(/[^0-9A-Fa-f]/,"",v); print v; exit } } }')
   deviceid=$( (echo "$a_txt"; echo "$r_txt") | grep -Eio 'deviceid=[0-9a-f:]{17}' | head -n1 | cut -d= -f2 || true)
   # Extract RAOP instance 12-hex prefix: lines look like "= ... 001122334455@Name _raop._tcp ..."
   raop_prefix=$( (echo "$r_txt"; avahi_dump _raop._tcp) | awk 'tolower($0) ~ /_raop\._tcp/ { for(i=1;i<=NF;i++) if ($i ~ /@/) { split($i,a,"@"); print a[1]; exit } }' | tr -d '\r' | head -n1)
 
-  if [[ -z "${pk:-}" ]]; then
-    echo "ERROR: pk missing in _airplay._tcp TXT for host '$h'" >&2
+  if [[ -z "${pk:-}" || ${#pk} -lt 40 ]]; then
+    echo "ERROR: pk missing/short in _airplay._tcp TXT for host '$h' (len=${#pk})" >&2
     rc=1
   fi
   if [[ -z "${deviceid:-}" || "$deviceid" =~ ^00:00:00:00:00:00$ ]]; then
@@ -157,7 +157,7 @@ main() {
   write_verify_json "$h" "$pk" "$deviceid" "$inst_mtime"
 
   local pkshort
-  pkshort="${pk:0:8}"
+  pkshort="${pk:0:8}...${pk: -8} (len=${#pk})"
   if [[ $rc -eq 0 ]]; then
     echo "${h} iface=${iface:-unknown} deviceid=${deviceid} pk=${pkshort} status=OK"
   else

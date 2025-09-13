@@ -49,7 +49,7 @@ main() {
   fi
   if [[ "$dev" == hw:* ]]; then
     # Require hardware 44.1k
-    open_quick "$dev" || { err "shairport preflight: sink not 44.1k (open failed) → see docs/OPERATIONS.md#clocking"; exit 2; }
+    open_quick "$dev" || { err "shairport preflight: sink not 44.1k (open failed) → run /opt/airplay_wyse/bin/apply to reselect or regenerate wrapper"; exit 2; }
     hwp="$(hw_params_path "$dev" || true)"
     if [[ -n "$hwp" && -f "$hwp" ]]; then
       rate=$(awk '/^rate:/{print $2}' "$hwp" 2>/dev/null || true)
@@ -61,9 +61,8 @@ main() {
     exit 0
   fi
   # Named/plug PCMs: accept boundary open at 44.1k
-  open_quick "$dev" || { err "shairport preflight: sink not 44.1k (open failed) → see docs/OPERATIONS.md#clocking"; exit 4; }
+  open_quick "$dev" || { err "shairport preflight: sink not 44.1k (plug boundary failed) → run /opt/airplay_wyse/bin/apply to regenerate wrapper"; exit 4; }
   exit 0
 }
 
 main "$@"
-

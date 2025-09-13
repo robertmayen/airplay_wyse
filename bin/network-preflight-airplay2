@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# network-preflight-airplay2: Gate AirPlay 2 readiness by asserting PTP ports are open.
+# Fails if local firewall effectively blocks UDP 319/320. Prints one concise reason.
+
+CONF="/etc/shairport-sync.conf"
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+say() { echo "$(ts) [net-preflight] $*"; }
+err() { echo "$(ts) [net-preflight] $*" >&2; }
+
+iface_from_conf() {
+  awk 'BEGIN{IGNORECASE=1} /interface[[:space:]]*=/ {match($0, /=[[:space:]]*"[^"]+"/); if (RSTART>0) {v=substr($0, RSTART+2, RLENGTH-2); gsub(/^[ \t\"]+|[ \t\"]+$/, "", v); print v; exit}}' "$CONF" 2>/dev/null || true
+}
+
+primary_iface() {
+  local i
+  i="$(iface_from_conf || true)"
+  if [[ -z "$i" ]] && command -v ip >/dev/null 2>&1; then
+    i=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')
+  fi
+  echo "$i"
+}
+
+have_prog() { command -v "$1" >/dev/null 2>&1; }
+
+ptp_listening_ok() {
+  # Informational: nqptp should bind 319/320/udp
+  if have_prog ss; then
+    ss -unlp 2>/dev/null | grep -E ':(319|320) ' >/dev/null 2>&1 && return 0 || return 1
+  fi
+  return 0
+}
+
+ufw_blocking() {
+  # Returns 0 (blocked) / 1 (not blocked)
+  have_prog ufw || return 1
+  out=$(ufw status verbose 2>/dev/null || true)
+  echo "$out" | grep -qi '^Status: active' || return 1
+  local inc def_in
+  def_in=$(echo "$out" | awk -F'[: ]+' '/^Default:/{for(i=1;i<=NF;i++) if($i ~ /incoming/){print $(i+1); exit}}')
+  # if default deny incoming and no explicit allow for 319/320 UDP → blocked
+  if [[ "${def_in,,}" == "deny" ]]; then
+    echo "$out" | grep -Eiq '\b(319|320)\/(udp|UDP)\b.*ALLOW' && return 1 || return 0
+  fi
+  return 1
+}
+
+nft_blocking() {
+  have_prog nft || return 1
+  rs=$(nft list ruleset 2>/dev/null || true)
+  [[ -n "$rs" ]] || return 1
+  # Heuristic: INPUT policy drop and no rule that accepts udp dport 319/320
+  input_drop=$(echo "$rs" | awk 'tolower($0) ~ /hook input/ && tolower($0) ~ /policy drop/ {print 1; exit}')
+  if [[ "$input_drop" == "1" ]]; then
+    echo "$rs" | grep -Eiq 'udp dport \{? *319' && allow319=1 || allow319=0
+    echo "$rs" | grep -Eiq 'udp dport \{? *320' && allow320=1 || allow320=0
+    if [[ $allow319 -eq 1 || $allow320 -eq 1 ]]; then return 1; else return 0; fi
+  fi
+  return 1
+}
+
+iptables_blocking() {
+  have_prog iptables || return 1
+  pol=$(iptables -S INPUT 2>/dev/null | awk '/^-P INPUT/ {print tolower($3); exit}')
+  if [[ "$pol" == "drop" || "$pol" == "reject" ]]; then
+    r319=$(iptables -S INPUT 2>/dev/null | grep -E -- '-p udp .*--dport 319 .* -j ACCEPT' || true)
+    r320=$(iptables -S INPUT 2>/dev/null | grep -E -- '-p udp .*--dport 320 .* -j ACCEPT' || true)
+    [[ -z "$r319$r320" ]] && return 0 || return 1
+  fi
+  return 1
+}
+
+mdns_info() {
+  have_prog ss && ss -unlp 2>/dev/null | grep -q ':5353 ' && echo 'mdns=LISTEN' || echo 'mdns=unknown'
+}
+
+rtsp_info() {
+  have_prog ss && ss -tnlp 2>/dev/null | grep -q ':7000 ' && echo 'rtsp=LISTEN' || echo 'rtsp=unknown'
+}
+
+main() {
+  local iface
+  iface="$(primary_iface || true)"
+  say "Interface=${iface:-unknown}"
+  if ! ptp_listening_ok; then
+    err "AP2/PTP not listening on UDP 319/320 (nqptp)"
+    exit 1
+  fi
+  if ufw_blocking || nft_blocking || iptables_blocking; then
+    err "AP2/PTP blocked on UDP 319/320 → AirPlay 2 connect will fail"
+    exit 2
+  fi
+  say "PTP UDP 319/320: OPEN  ($(mdns_info); $(rtsp_info))"
+}
+
+main "$@"
+

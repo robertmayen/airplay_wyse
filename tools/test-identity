@@ -12,6 +12,7 @@ main() {
   good="$REPO_DIR/tools/fixtures/ap2_txt_good.txt"
   bad1="$REPO_DIR/tools/fixtures/ap2_txt_bad_missing_pk.txt"
   bad2="$REPO_DIR/tools/fixtures/ap2_txt_bad_deviceid_zero.txt"
+  bad3="$REPO_DIR/tools/fixtures/ap2_txt_truncated_pk.txt"
 
   [[ -f "$good" && -f "$bad1" && -f "$bad2" ]] || fail "fixtures missing"
 
@@ -32,7 +33,12 @@ main() {
   else
     pass "zero deviceid fails as expected"
   fi
+
+  if "$REPO_DIR/bin/verify-airplay-identity" --from-files "$bad3" "$good" >/dev/null 2>&1; then
+    fail "truncated pk should fail"
+  else
+    pass "truncated pk fails as expected"
+  fi
 }
 
 main "$@"
-

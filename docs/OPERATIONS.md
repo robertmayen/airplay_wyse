@@ -100,12 +100,19 @@ alsa:
 - If preflight blocks start, re-run `bin/apply` to select a 44.1k sink or attach a USB DAC.
 
 ## Health & Troubleshooting
+- AirPlay 2 Readiness
+- Three gates must pass for reliable connect:
+  - PTP open (UDP 319/320) for nqptp on serving NIC.
+  - ALSA sink opens at 44.1k (or named rate wrapper accepts 44.1k boundary).
+  - TXT identity valid: `_airplay._tcp` has non‑zero deviceid and full‑length pk.
+- Tools: `./bin/debug-audio` prints a one-line summary; see details below.
 - Quick view: `./bin/test-airplay2` (strict checks).
 - Detailed view: `./bin/test-airplay2 --logs --mdns --alsa`.
 - Logs: `journalctl -u shairport-sync -n 200` and `journalctl -u nqptp -n 200`.
 - Verify AirPlay 2 capability: `shairport-sync -V | grep -q "AirPlay2"`.
 - Verify nqptp active: `systemctl is-active nqptp`.
 - Verify advertisement: `avahi-browse -rt _airplay._tcp` (RAOP `_raop._tcp` may appear as a fallback).
+ - Verify TXT: `./bin/verify-airplay-identity` (waits briefly for Avahi; prints pk length and deviceid).
 
 If your device does not appear
 - Ensure `/etc/shairport-sync.conf` has no leftover template markers.
@@ -131,7 +138,9 @@ Note on NQPTP
   - `sudo sh -c 'echo AIRPLAY_WYSE_DEBUG=1 >> /etc/default/airplay_wyse'`
   - Re-render config: `sudo ./bin/apply`
   - Check: `journalctl -u shairport-sync -n 200 | rg -i "underrun|overrun|xruns|buffer|latency"`
-  - Use `./bin/debug-audio` for comprehensive diagnostics; identity section highlights missing `pk`/`deviceid` and prints TXT dumps if invalid.
+  - Use `./bin/debug-audio` for comprehensive diagnostics:
+    - AP2 readiness summary: PTP, ALSA, TXT.
+    - Identity section highlights missing `pk`/`deviceid` and prints TXT dumps if invalid.
 
 Decision tree (≤10 lines):
 - Output FPS ~47k or preflight fails → you’re on 48k.
