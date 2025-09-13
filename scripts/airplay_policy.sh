@@ -420,8 +420,8 @@ case "${1:-}" in
     fi ;;
   setup)
     # Capture baseline snapshot, then apply+verify, then after snapshot
-    local before="${_WORKDIR}/airplay_policy_report.before.txt"
-    local after="${_WORKDIR}/airplay_policy_report.after.txt"
+    before="${_WORKDIR}/airplay_policy_report.before.txt"
+    after="${_WORKDIR}/airplay_policy_report.after.txt"
     report_state "$before"
     if apply_and_verify_with_fallback; then
       best_effort_restart_services
