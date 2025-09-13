@@ -5,18 +5,40 @@ set -euo pipefail
 # - For hw:<c>,<d> require /proc/.../hw_params rate: 44100 while opened.
 # - For named/plug PCMs, require that opening at -r 44100 succeeds quickly.
 
-CONF="/etc/shairport-sync.conf"
+CONF_DIR="/etc"
+CONF_MAIN="/etc/shairport-sync.conf"
+CONF_D_DIR="/etc/shairport-sync.conf.d"
 REPO_DIR="/opt/airplay_wyse"
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 err() { echo "$(ts) [preflight-alsa] $*" >&2; }
 
-read_device() {
-  awk 'BEGIN{IGNORECASE=1}
-    /^alsa[[:space:]]*=/{insec=1}
+read_device_from_file() {
+  local file="$1"
+  [ -f "$file" ] || return 1
+  awk 'BEGIN{IGNORECASE=1; insec=0}
+    /^[[:space:]]*\/\//{next} /^[[:space:]]*#/ {next}
+    /alsa[[:space:]]*=/{insec=1}
     insec && /output_device[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
     insec && /^};/ {insec=0}
-  ' "$CONF" 2>/dev/null || true
+  ' "$file" 2>/dev/null || true
+}
+
+read_effective_device() {
+  # Mimic shairport’s conf layering: main file then conf.d/*.conf, last one wins
+  local dev=""
+  dev="$(read_device_from_file "$CONF_MAIN" || true)"
+  if [ -d "$CONF_D_DIR" ]; then
+    # Process files in lexical order; later overrides earlier
+    local f
+    for f in "$CONF_D_DIR"/*.conf; do
+      [ -f "$f" ] || continue
+      local d
+      d="$(read_device_from_file "$f" || true)"
+      if [ -n "$d" ]; then dev="$d"; fi
+    done
+  fi
+  [ -n "$dev" ] && echo "$dev"
 }
 
 open_quick() {
@@ -48,7 +70,7 @@ hw_params_path() {
 
 main() {
   local dev hwp rate
-  dev="$(read_device || true)"
+  dev="$(read_effective_device || true)"
   if [[ -z "$dev" ]]; then
     err "shairport preflight: sink not 44.1k (no device) → see docs/OPERATIONS.md#Clocking"
     exit 1
