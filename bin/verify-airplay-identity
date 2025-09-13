@@ -51,22 +51,33 @@ raop_prefix_from_dump() {
 colonize_mac() { echo "$1" | sed -E 's/([0-9A-Fa-f]{2})/\1:/g; s/:$//' | tr '[:upper:]' '[:lower:]'; }
 
 select_ap2_by_deviceid() {
-  # args: expected_deviceid -> prints PK and DEVICEID
+  # args: expected_deviceid -> prints PK and DEVICEID (mawk-safe)
   local want="$1" dump pk di
   dump=$(extract_overrides_or_dump _airplay._tcp)
-  awk -v want="$want" 'BEGIN{IGNORECASE=1; inrec=0; di=""; pk=""}
+  awk -v want="$want" '
+    BEGIN{inrec=0; di=""; pk=""; want_l=want; for(i=1;i<=length(want_l);i++){c=substr(want_l,i,1); want_l2=want_l2 (c>="A"&&c<="Z"?tolower(c):c)}; want_l=want_l2}
+    # normalize tolower function portable
+    function tolow(s,    i,c,t){t=""; for(i=1;i<=length(s);i++){c=substr(s,i,1); t=t ((c>="A"&&c<="Z")?tolower(c):c)}; return t}
     /^=/ {
-      if (di!="" && toupper(di)==toupper(want)) { printf("PK=%s\nDEVICEID=%s\n", pk, di); exit }
+      if (di!="" && tolow(di)==want_l) { printf("PK=%s\nDEVICEID=%s\n", pk, di); exit }
       di=""; pk=""; inrec=1; next
     }
     /TXT records:/ { inrec=1; next }
     inrec && /deviceid=/ {
-      if (match($0, /deviceid=([0-9A-Fa-f:]+)/, m)) di=m[1]
+      line=$0; line_l=tolow(line)
+      pos=index(line_l, "deviceid=")
+      if (pos>0) { di=substr(line, pos+9, 17) }
     }
     inrec && /pk=/ {
-      if (match($0, /pk=([0-9A-Fa-f]+)/, p)) pk=p[1]
+      line=$0; pos=index(line, "pk=")
+      if (pos>0) {
+        s=substr(line, pos+3)
+        # strip non-hex
+        gsub(/[^0-9A-Fa-f]/, "", s)
+        pk=s
+      }
     }
-    END{ if (di!="" && toupper(di)==toupper(want)) printf("PK=%s\nDEVICEID=%s\n", pk, di) }
+    END{ if (di!="" && tolow(di)==want_l) printf("PK=%s\nDEVICEID=%s\n", pk, di) }
   ' <<< "$dump"
 }
 

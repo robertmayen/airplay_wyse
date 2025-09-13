@@ -224,8 +224,10 @@ main() {
         cat >/etc/asound.d/airplay_wyse.conf <<EOF
 pcm.${plug_name} {
   type rate
-  slave.pcm "${fallback_dev}"
-  slave.rate ${slave_rate}
+  slave {
+    pcm "${fallback_dev}"
+    rate ${slave_rate}
+  }
   converter "samplerate_best"
 }
 EOF
