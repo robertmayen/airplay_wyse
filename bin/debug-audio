@@ -55,6 +55,13 @@ device_is_dmix_or_default() {
   return 1
 }
 
+named_pcm_loaded() {
+  local dev="$1"
+  [[ -z "$dev" ]] && return 1
+  command -v aplay >/dev/null 2>&1 || return 1
+  aplay -L 2>/dev/null | awk -v d="$dev" 'BEGIN{ok=0} $0==d{ok=1} END{exit ok?0:1}'
+}
+
 extract_fps_window() {
   # Prints last up to 12 Output FPS (r) values, one per line
   journalctl -u shairport-sync -n 500 --no-pager 2>/dev/null | \
@@ -415,8 +422,12 @@ say "Collecting diagnostics..."
   if [[ -x "$(dirname "$0")/alsa-probe" && "$dev" == hw:* ]]; then
     if "$(dirname "$0")/alsa-probe" --validate "$dev"; then echo "OK: $dev opened at 44.1k"; else warn "$dev did not open at 44.1k"; fi
   else
-    timeout 2 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q 2>/dev/null && \
-      echo "OK: $dev opened (via plug) at 44.1k" || warn "$dev did not open at 44.1k"
+    if ! named_pcm_loaded "$dev"; then
+      warn "Named PCM '$dev' not loaded by ALSA; ensure /etc/asound.conf includes /etc/asound.d/airplay_wyse.conf"
+    else
+      timeout 2 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q 2>/dev/null && \
+        echo "OK: $dev opened (via plug) at 44.1k" || warn "$dev did not open at 44.1k"
+    fi
   fi
   if device_is_dmix_or_default "$dev"; then
     warn "Configured PCM appears to resolve to dmix/default. This typically forces 48 kHz. Select a raw hw:<card>,<dev> sink."

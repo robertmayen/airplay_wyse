@@ -25,6 +25,12 @@ open_quick() {
   return 0
 }
 
+named_pcm_loaded() {
+  local dev="$1"
+  command -v aplay >/dev/null 2>&1 || return 1
+  aplay -L 2>/dev/null | awk -v d="$dev" 'BEGIN{ok=0} $0==d{ok=1} END{exit ok?0:1}'
+}
+
 hw_params_path() {
   local dev="$1" card d base
   [[ "$dev" =~ ^hw:([0-9]+),([0-9]+)$ ]] || return 1
@@ -61,6 +67,10 @@ main() {
     exit 0
   fi
   # Named/plug PCMs: accept boundary open at 44.1k
+  if ! named_pcm_loaded "$dev"; then
+    err "shairport preflight: named PCM '$dev' not loaded by ALSA → ensure /etc/asound.conf includes /etc/asound.d/airplay_wyse.conf"
+    exit 5
+  fi
   open_quick "$dev" || { err "shairport preflight: sink not 44.1k (plug boundary failed) → run /opt/airplay_wyse/bin/apply to regenerate wrapper"; exit 4; }
   exit 0
 }

@@ -90,6 +90,14 @@ pcm.${plug_name} {
   converter "samplerate_best"
 }
 EOF
+          # Ensure ALSA loads our wrapper by including it from /etc/asound.conf
+          if [[ -f /etc/asound.conf ]]; then
+            if ! grep -Eq '(^|[[:space:]])include[[:space:]]+/etc/asound.d/airplay_wyse.conf' /etc/asound.conf; then
+              printf '\n# airplay_wyse include (named PCM wrappers)\ninclude /etc/asound.d/airplay_wyse.conf\n' >> /etc/asound.conf
+            fi
+          else
+            printf '# airplay_wyse: include named PCM wrappers\ninclude /etc/asound.d/airplay_wyse.conf\n' > /etc/asound.conf
+          fi
           device="$plug_name"
         else
           err=$(echo "$pj" | awk -F'"' '/"error"[[:space:]]*:/ {print $4; exit}')

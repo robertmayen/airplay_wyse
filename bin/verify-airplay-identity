@@ -28,15 +28,46 @@ avahi_dump() {
   timeout 8 avahi-browse -rt "$type" 2>/dev/null || true
 }
 
-extract_for_host() {
-  local type="$1" h="$2";
+extract_overrides_or_dump() {
+  local type="$1"
   if [[ -n "${AP2_TXT_OVERRIDE:-}" && "$type" == "_airplay._tcp" ]]; then
     cat "$AP2_TXT_OVERRIDE" 2>/dev/null || true; return 0
   fi
   if [[ -n "${RAOP_TXT_OVERRIDE:-}" && "$type" == "_raop._tcp" ]]; then
     cat "$RAOP_TXT_OVERRIDE" 2>/dev/null || true; return 0
   fi
-  avahi_dump "$type" | awk -v h="${h,,}" 'BEGIN{s=0} tolower($0)~h{ s=1 } s && /txt/ {print} s && /^=/ {print; s=0}'
+  avahi_dump "$type"
+}
+
+hwaddr_from_conf() {
+  local conf="/etc/shairport-sync.conf"
+  awk 'BEGIN{IGNORECASE=1} /hardware_address[[:space:]]*=/ {match($0, /=[[:space:]]*"[^"]+"/); if (RSTART>0) {v=substr($0, RSTART+2, RLENGTH-2); gsub(/^[ \t\"]+|[ \t\"]+$/, "", v); print v; exit}}' "$conf" 2>/dev/null || true
+}
+
+raop_prefix_from_dump() {
+  extract_overrides_or_dump _raop._tcp | awk 'tolower($0) ~ /_raop\._tcp/ { for(i=1;i<=NF;i++) if ($i ~ /@/) { split($i,a,"@"); print a[1]; exit } }' | tr -d '\r' | head -n1
+}
+
+colonize_mac() { echo "$1" | sed -E 's/([0-9A-Fa-f]{2})/\1:/g; s/:$//' | tr '[:upper:]' '[:lower:]'; }
+
+select_ap2_by_deviceid() {
+  # args: expected_deviceid -> prints PK and DEVICEID
+  local want="$1" dump pk di
+  dump=$(extract_overrides_or_dump _airplay._tcp)
+  awk -v want="$want" 'BEGIN{IGNORECASE=1; in=0; di=""; pk=""}
+    /^=/ {
+      if (di!="" && toupper(di)==toupper(want)) { printf("PK=%s\nDEVICEID=%s\n", pk, di); exit }
+      di=""; pk=""; in=1; next
+    }
+    /TXT records:/ { in=1; next }
+    in && /deviceid=/ {
+      if (match($0, /deviceid=([0-9A-Fa-f:]+)/, m)) di=m[1]
+    }
+    in && /pk=/ {
+      if (match($0, /pk=([0-9A-Fa-f]+)/, p)) pk=p[1]
+    }
+    END{ if (di!="" && toupper(di)==toupper(want)) printf("PK=%s\nDEVICEID=%s\n", pk, di) }
+  ' <<< "$dump"
 }
 
 usage() {
@@ -114,30 +145,40 @@ main() {
     echo "avahi-browse not available" >&2
     exit 2
   fi
+  # Optional wait for Avahi TXT and nqptp active
+  if command -v systemctl >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet nqptp.service; then
+      echo "ERROR: nqptp inactive" >&2
+      exit 3
+    fi
+  fi
   # Optional wait for Avahi TXT
   local attempts=0 max_attempts
   max_attempts=$(( wait_secs>0 ? wait_secs : 1 ))
   while :; do
-    a_txt=$(extract_for_host _airplay._tcp "$h" | tr -d '\r')
-    r_txt=$(extract_for_host _raop._tcp "$h" | tr -d '\r')
-    if [[ -n "$a_txt" || $attempts -ge $((max_attempts-1)) ]]; then break; fi
+    raop_prefix=$(raop_prefix_from_dump || true)
+    if [[ -n "$raop_prefix" ]]; then break; fi
     sleep 1; attempts=$((attempts+1))
   done
-  pk=$(echo "$a_txt" | tr -d '\r' | awk 'tolower($0) ~ /pk=/ { for(i=1;i<=NF;i++){ if(index($i,"pk=")==1){ v=$i; sub(/^pk=/,"",v); gsub(/[^0-9A-Fa-f]/,"",v); print v; exit } } }')
-  deviceid=$( (echo "$a_txt"; echo "$r_txt") | grep -Eio 'deviceid=[0-9a-f:]{17}' | head -n1 | cut -d= -f2 || true)
-  # Extract RAOP instance 12-hex prefix: lines look like "= ... 001122334455@Name _raop._tcp ..."
-  raop_prefix=$( (echo "$r_txt"; avahi_dump _raop._tcp) | awk 'tolower($0) ~ /_raop\._tcp/ { for(i=1;i<=NF;i++) if ($i ~ /@/) { split($i,a,"@"); print a[1]; exit } }' | tr -d '\r' | head -n1)
+  # Expected deviceid: prefer shairport config hardware_address; else RAOP instance prefix
+  expected_dev="$(hwaddr_from_conf || true)"
+  if [[ -z "$expected_dev" && -n "$raop_prefix" ]]; then expected_dev="$(colonize_mac "$raop_prefix")"; fi
+  if [[ -z "$expected_dev" ]]; then echo "ERROR: unable to determine expected deviceid" >&2; exit 4; fi
+
+  sel=$(select_ap2_by_deviceid "$expected_dev")
+  pk=$(echo "$sel" | awk -F= '/^PK=/{print $2}' | tr -d '\r')
+  deviceid=$(echo "$sel" | awk -F= '/^DEVICEID=/{print $2}' | tr -d '\r')
 
   if [[ -z "${pk:-}" || ${#pk} -lt 40 ]]; then
-    echo "ERROR: pk missing/short in _airplay._tcp TXT for host '$h' (len=${#pk})" >&2
+    echo "ERROR: pk missing/short in _airplay._tcp TXT (len=${#pk})" >&2
     rc=1
   fi
   if [[ -z "${deviceid:-}" || "$deviceid" =~ ^00:00:00:00:00:00$ ]]; then
-    echo "ERROR: deviceid is zero or missing for host '$h'" >&2
+    echo "ERROR: deviceid is zero or missing" >&2
     rc=1
   fi
   if [[ -n "${raop_prefix:-}" && "$raop_prefix" =~ ^0{12}$ ]]; then
-    echo "ERROR: _raop instance prefix is zero (unselectable endpoint) for host '$h'" >&2
+    echo "ERROR: _raop instance prefix is zero (unselectable endpoint)" >&2
     rc=1
   fi
 
