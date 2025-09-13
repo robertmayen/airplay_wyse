@@ -86,7 +86,8 @@ Optional inventory hints
 - Enable Shairport runtime statistics and repo diagnostics:
   - `echo AIRPLAY_WYSE_DEBUG=1 | sudo tee -a /etc/default/airplay_wyse`
   - `sudo ./bin/apply`
-  - `./bin/debug-audio` (collects build, service status, identity, ALSA tests, Wi‑Fi powersave, and searches logs for underruns/overruns)
+  - `./bin/debug-audio` (collects build, service status, identity, ALSA tests, Wi‑Fi powersave, nqptp lock/offset hints, and scheduler/CPU info; searches logs for underruns/overruns)
+  - `./bin/debug-audio --live 20s` while audio is playing to stream live Shairport/NQPTP events and show a short summary with link counters. No files are written.
   - `journalctl -u shairport-sync -n 200 | rg -i 'underrun|overrun|xruns|buffer|latency'`
 - No periodic root timers, no on-device GitOps, no custom Avahi config unless you explicitly add one.
 

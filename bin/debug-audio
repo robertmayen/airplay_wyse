@@ -6,6 +6,8 @@ set -euo pipefail
 # - Verifies AP2/RAOP identity via verify-airplay-identity
 # - Inspects ALSA devices and mixer controls; tests opening selected device at 44.1k via plug
 # - Inspects network interface used and basic Wi‑Fi power-save status if applicable
+# - Summarises recent nqptp timing status (lock/offset/resync)
+# - Captures key scheduler/CPU info for shairport-sync
 # - Summarises likely causes with remediation hints
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
@@ -15,6 +17,10 @@ err() { echo "$(ts) [debug-audio] ERROR: $*"; }
 
 CONF="/etc/shairport-sync.conf"
 DEFAULTS="/etc/default/airplay_wyse"
+
+# Flags
+LIVE_DUR=""
+IFACE_OVERRIDE=""
 
 read_conf_kv() {
   local key="$1"
@@ -44,7 +50,147 @@ cpu_for_proc() {
   ps -o %cpu= -p "$p" 2>/dev/null | awk '{print $1+0}' || echo 0
 }
 
+usage() {
+  cat <<EOF
+Usage: ./bin/debug-audio [--live <duration>] [--iface <iface>]
+
+Examples:
+  ./bin/debug-audio                 # baseline diagnostics only
+  ./bin/debug-audio --live 20s      # baseline + 20s live capture (no files written)
+  ./bin/debug-audio --live 30 --iface enp1s0
+
+Duration accepts seconds (e.g., 20 or 20s) or minutes (e.g., 2m).
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --live) shift; LIVE_DUR="${1:-}" ;;
+      --iface|--interface) shift; IFACE_OVERRIDE="${1:-}" ;;
+      -h|--help) usage; exit 0 ;;
+      *) err "unknown argument: $1"; exit 1 ;;
+    esac
+    shift || true
+  done
+}
+
+duration_to_seconds() {
+  local d="$1"
+  if [[ -z "$d" ]]; then echo 0; return 0; fi
+  if [[ "$d" =~ ^[0-9]+$ ]]; then echo "$d"; return 0; fi
+  if [[ "$d" =~ ^([0-9]+)s$ ]]; then echo "${BASH_REMATCH[1]}"; return 0; fi
+  if [[ "$d" =~ ^([0-9]+)m$ ]]; then echo $(( ${BASH_REMATCH[1]} * 60 )); return 0; fi
+  echo "$d"
+}
+
+iface_guess() {
+  local iface
+  iface="${IFACE_OVERRIDE:-}"
+  if [[ -z "$iface" ]]; then
+    iface=$(iface_from_conf || true)
+  fi
+  if [[ -z "$iface" ]]; then
+    iface=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')
+  fi
+  echo "$iface"
+}
+
+show_iface_details() {
+  local iface="$1"
+  [[ -n "$iface" ]] || return 0
+  say "Interface: $iface ($(ip -br link show "$iface" 2>/dev/null | awk '{print $3}'))"
+  ip -br addr show "$iface" 2>/dev/null || true
+  if command -v ethtool >/dev/null 2>&1; then
+    ethtool "$iface" 2>/dev/null | awk 'NR<=12{print}' || true
+    ethtool -i "$iface" 2>/dev/null | awk 'NR<=6{print}' || true
+  fi
+  say "Link counters (ip -s link):"
+  ip -s link show dev "$iface" 2>/dev/null || true
+  if iw dev "$iface" info >/dev/null 2>&1; then
+    say "Wi‑Fi powersave: $(wifi_powersave "$iface")"
+    iw dev "$iface" link 2>/dev/null || true
+  fi
+}
+
+show_nqptp_status() {
+  say "nqptp status:"
+  if systemctl is-active --quiet nqptp.service; then echo active; else echo inactive; fi
+  if systemctl is-enabled --quiet nqptp.service; then echo enabled; else echo disabled; fi
+  say "Recent nqptp logs (lock/offset/resync):"
+  if command -v rg >/dev/null 2>&1; then
+    journalctl -u nqptp -n 120 --no-pager 2>/dev/null | \
+      rg -i "lock|offset|resync|synch|leap|step" -n || echo "(no notable messages)"
+  else
+    journalctl -u nqptp -n 120 --no-pager 2>/dev/null | \
+      grep -Ei "lock|offset|resync|synch|leap|step" || echo "(no notable messages)"
+  fi
+}
+
+show_shairport_sched() {
+  local pid
+  if pidof shairport-sync >/dev/null 2>&1; then
+    pid=$(pidof shairport-sync | awk '{print $1}')
+    say "Shairport CPU% (snapshot): $(cpu_for_proc "$pid")"
+    if ps -p "$pid" >/dev/null 2>&1; then
+      ps -Lo pid,rtprio,pri,ni,psr,pcpu,stat,comm -p "$pid" 2>/dev/null || true
+    fi
+  fi
+}
+
+live_capture() {
+  # Stream logs for a bounded duration, summarize key events; do not write files.
+  local dursecs="$1" iface
+  iface="$(iface_guess)"
+  say "Live capture for ${dursecs}s (iface=${iface:-unknown}) — no files will be written"
+  if [[ -n "$iface" ]]; then
+    say "Link counters before:"
+    ip -s link show dev "$iface" 2>/dev/null || true
+  fi
+
+  local c_und=0 c_over=0 c_xrun=0 c_buf=0 c_syncerr=0 c_resync=0 c_lock=0 c_unlock=0
+  local -a samples=()
+  if ! command -v journalctl >/dev/null 2>&1; then
+    warn "journalctl not available; skipping live log stream"
+  else
+    local line lcl
+    while IFS= read -r line; do
+      echo "$line"
+      lcl=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')
+      [[ "$lcl" == *"underrun"* ]] && ((c_und++))
+      [[ "$lcl" == *"overrun"* ]] && ((c_over++))
+      [[ "$lcl" == *"xrun"* ]] && ((c_xrun++))
+      [[ "$lcl" == *"buffer"* ]] && ((c_buf++))
+      [[ "$lcl" == *"sync error"* ]] && ((c_syncerr++))
+      { [[ "$lcl" == *"resync"* ]] || [[ "$lcl" == *"flush"* ]]; } && ((c_resync++))
+      if [[ "$lcl" == *"nqptp"* ]]; then
+        [[ "$lcl" == *"lock"* ]] && ((c_lock++))
+        [[ "$lcl" == *"unlock"* ]] && ((c_unlock++))
+      fi
+      if [[ ${#samples[@]} -lt 8 ]]; then
+        if [[ "$lcl" == *"underrun"* || "$lcl" == *"overrun"* || "$lcl" == *"xrun"* || "$lcl" == *"sync error"* || "$lcl" == *"resync"* || "$lcl" == *"flush"* || "$lcl" == *"offset"* ]]; then
+          samples+=("$line")
+        fi
+      fi
+    done < <(timeout "$dursecs" journalctl -f -u shairport-sync -u nqptp --no-pager -o short-iso 2>&1 || true)
+  fi
+
+  say "Summary of live capture:"
+  echo "events: underrun=$c_und overrun=$c_over xruns=$c_xrun sync_error=$c_syncerr resync/flush=$c_resync nqptp_lock=$c_lock nqptp_unlock=$c_unlock"
+  say "Sample lines:"
+  if [[ ${#samples[@]} -gt 0 ]]; then
+    for s in "${samples[@]}"; do echo "$s"; done
+  else
+    echo "(no notable lines)"
+  fi
+  if [[ -n "${iface:-}" ]]; then
+    say "Link counters after:"
+    ip -s link show dev "$iface" 2>/dev/null || true
+  fi
+}
+
 main() {
+  parse_args "$@"
   say "Collecting diagnostics..."
   local ver build soxr
   if command -v shairport-sync >/dev/null 2>&1; then
@@ -82,14 +228,14 @@ main() {
     warn "verify-airplay-identity not executable"
   fi
 
-say "Recent Shairport logs (underruns/overruns/errors):"
-if command -v rg >/dev/null 2>&1; then
-  journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
-    rg -i "underrun|overrun|xruns|buffer|latency|can not be set|error" -n || echo "(no notable messages)"
-else
-  journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
-    grep -Ei "underrun|overrun|xruns|buffer|latency|can not be set|error" || echo "(no notable messages)"
-fi
+  say "Recent Shairport logs (underruns/overruns/errors):"
+  if command -v rg >/dev/null 2>&1; then
+    journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
+      rg -i "underrun|overrun|xruns|buffer|latenc|sync error|can not be set|error" -n || echo "(no notable messages)"
+  else
+    journalctl -u shairport-sync -n 200 --no-pager 2>/dev/null | \
+      grep -Ei "underrun|overrun|xruns|buffer|latenc|sync error|can not be set|error" || echo "(no notable messages)"
+  fi
 
   say "ALSA devices:"
   aplay -l 2>/dev/null || true
@@ -107,25 +253,24 @@ fi
   fi
 
   local iface
-  iface=$(iface_from_conf || true)
-  if [[ -z "$iface" ]]; then
-    iface=$(ip route 2>/dev/null | awk '/^default/ {print $5; exit}')
-  fi
-  if [[ -n "$iface" ]]; then
-    say "Interface: $iface ($(ip -br link show "$iface" 2>/dev/null | awk '{print $3}'))"
-    if iw dev "$iface" info >/dev/null 2>&1; then
-      say "Wi‑Fi powersave: $(wifi_powersave "$iface")"
-    fi
-  fi
-
-  if pidof shairport-sync >/dev/null 2>&1; then
-    say "Shairport CPU% (snapshot): $(cpu_for_proc $(pidof shairport-sync))"
-  fi
+  iface="$(iface_guess)"
+  show_iface_details "$iface"
+  show_nqptp_status
+  show_shairport_sched
 
   say "Done. Likely causes and hints:"
   echo "- If logs show underruns/overruns: increase Wi‑Fi stability (reduce powersave), prefer Ethernet, or move AP closer."
   echo "- If ALSA device can't open at 44.1k and you're not using a USB DAC, keep using plughw:<card>,<dev>."
   echo "- If CPU% is high and soxr is used, consider reducing other load; Wyse 5070 usually handles it fine."
+  echo "- If nqptp is frequently unlocking or large offsets appear, check LAN stability and any VM/clock virtualization."
+
+  # Optional live capture
+  if [[ -n "${LIVE_DUR:-}" ]]; then
+    local secs
+    secs=$(duration_to_seconds "$LIVE_DUR")
+    [[ "$secs" =~ ^[0-9]+$ ]] || { warn "invalid --live duration '$LIVE_DUR'"; return 0; }
+    live_capture "$secs"
+  fi
 }
 
 main "$@"
