@@ -71,6 +71,21 @@ detect_stack() {
   fi
 }
 
+shairport_unit_scope() {
+  # Prints: system | user | none
+  if cmd_exists systemctl; then
+    if systemctl status shairport-sync >/dev/null 2>&1; then
+      echo system; return 0
+    fi
+    if [ -n "${SUDO_USER:-}" ]; then
+      sudo -u "$SUDO_USER" systemctl --user status shairport-sync >/dev/null 2>&1 && { echo user; return 0; }
+    else
+      systemctl --user status shairport-sync >/dev/null 2>&1 && { echo user; return 0; }
+    fi
+  fi
+  echo none
+}
+
 list_alsa_hw() {
   [ "$_ALSA_PRESENT" -eq 1 ] || return 0
   aplay -l 2>/dev/null | awk '
@@ -214,7 +229,11 @@ verify_policy_A() {
 
 verify_policy_B_pipewire() {
   # Ensure we can open default at 44.1 which PipeWire will accept and resample if graph is 48
-  timeout 3 aplay -D default -r 44100 -f S16_LE -c 2 -d 1 /dev/zero >/dev/null 2>&1
+  if [ -n "${SUDO_USER:-}" ]; then
+    sudo -u "$SUDO_USER" timeout 3 aplay -D default -r 44100 -f S16_LE -c 2 -d 1 /dev/zero >/dev/null 2>&1
+  else
+    timeout 3 aplay -D default -r 44100 -f S16_LE -c 2 -d 1 /dev/zero >/dev/null 2>&1
+  fi
 }
 
 verify_policy_B_alsa() {
@@ -230,6 +249,7 @@ apply_alsa_rate_plugin_policy_B() {
   # ALSA-only host, define a single high-quality rate-conversion PCM
   require_root
   local hwdev="$1"; shift
+  local converter="${1:-samplerate_best}"
   local file="/etc/asound.conf"
   # Append or replace a managed block
   local tmp
@@ -251,11 +271,45 @@ pcm.airplay48 {
     rate 48000
   }
   # Prefer libsamplerate (samplerate_best). Fallback to speexrate quality 10 if unavailable.
-  converter "samplerate_best"
+  converter "${converter}"
 }
 # END AIRPLAY48
 EOF
   log "Defined pcm.airplay48 in $file"
+}
+
+ensure_alsa_rate_pcm_works() {
+  # Try a sequence of converters until airplay48 opens
+  local hwdev="$1"
+  local try
+  for try in samplerate_best speexrate_best speexrate_10; do
+    apply_alsa_rate_plugin_policy_B "$hwdev" "$try"
+    if verify_policy_B_alsa; then return 0; fi
+  done
+  # As last resort, write without converter line (ALSA default)
+  require_root
+  local file="/etc/asound.conf" tmp
+  tmp=$(mktemp)
+  if [ -f "$file" ]; then
+    awk 'BEGIN{inblk=0}
+      /BEGIN AIRPLAY48/ {inblk=1; next}
+      /END AIRPLAY48/ {inblk=0; next}
+      { if(!inblk) print }' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+  fi
+  cat >> "$file" <<EOF
+# BEGIN AIRPLAY48 (managed by airplay_policy.sh)
+pcm.airplay48 {
+  type rate
+  slave {
+    pcm "${hwdev}"
+    rate 48000
+  }
+}
+# END AIRPLAY48
+EOF
+  rm -f "$tmp"
+  verify_policy_B_alsa
 }
 
 restart_services_note() {
@@ -272,16 +326,17 @@ apply_all() {
 
   # Decide output device for shairport
   local device=""
+  local scope; scope=$(shairport_unit_scope)
   if [ "$policy" = "A" ]; then
     device=$(pick_hw_device)
     if [ -z "$device" ]; then err "No ALSA hw device found"; exit 1; fi
   else
-    if [ "$_PW_PRESENT" -eq 1 ] && [ "$_PW_ALSA_DEFAULT" -eq 1 ]; then
-      device="default"   # via pipewire-alsa; single resampler in PW
+    if [ "$_PW_PRESENT" -eq 1 ] && [ "$_PW_ALSA_DEFAULT" -eq 1 ] && [ "$scope" = "user" ]; then
+      device="default"   # via pipewire-alsa in the same user session
     else
       device=$(pick_hw_device)
       if [ -z "$device" ]; then err "No ALSA hw device found"; exit 1; fi
-      apply_alsa_rate_plugin_policy_B "$device"
+      ensure_alsa_rate_pcm_works "$device" || true
       device="airplay48"
     fi
   fi
