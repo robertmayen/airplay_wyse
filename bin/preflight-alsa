@@ -43,7 +43,8 @@ read_effective_device() {
 
 open_quick() {
   local dev="$1"
-  timeout 0.25 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q >/dev/null 2>&1 || return 1
+  # Use a short, but less aggressive timeout to avoid false negatives on cold hardware paths
+  timeout 1.5 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -d 1 /dev/zero -q >/dev/null 2>&1 || return 1
   return 0
 }
 

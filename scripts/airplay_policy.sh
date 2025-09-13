@@ -99,8 +99,17 @@ list_alsa_hw() {
 
 alsa_hw_supports_44100() {
   local dev="$1"
-  # Try to open at 44.1 S16 stereo for a brief time
-  timeout 3 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -d 1 /dev/zero >/dev/null 2>&1
+  # Try to open at 44.1 S16 stereo and ensure exact 44.1 (not coerced)
+  local tmp
+  tmp=$(mktemp)
+  if ! timeout 3 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -d 1 /dev/zero >"$tmp" 2>&1; then
+    rm -f "$tmp"; return 1
+  fi
+  if grep -qi "rate is not accurate" "$tmp"; then
+    rm -f "$tmp"; return 1
+  fi
+  rm -f "$tmp"
+  return 0
 }
 
 pick_hw_device() {
