@@ -214,7 +214,8 @@ main() {
         [[ -e "/proc/asound/card0/pcm${h}p" ]] && { fallback_dev="hw:0,${h}"; break; }
       done
       if [[ -n "$fallback_dev" ]]; then
-        plug_name="aw_plug_44k_$(echo "$fallback_dev" | tr -cd '0-9_,')"
+        # Name must avoid commas; use card_dev with underscore
+        plug_name="aw_plug_44k_$(echo "$fallback_dev" | awk -F'[:,]' '{printf "%s_%s", $2, $3}')"
         install -d -m 0755 /etc/asound.d
         # Prefer high-quality resampler if available; fallback is linear
         # If hardware is HDMI @48k, set slave.rate accordingly so ALSA resamples.

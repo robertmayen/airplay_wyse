@@ -54,16 +54,16 @@ select_ap2_by_deviceid() {
   # args: expected_deviceid -> prints PK and DEVICEID
   local want="$1" dump pk di
   dump=$(extract_overrides_or_dump _airplay._tcp)
-  awk -v want="$want" 'BEGIN{IGNORECASE=1; in=0; di=""; pk=""}
+  awk -v want="$want" 'BEGIN{IGNORECASE=1; inrec=0; di=""; pk=""}
     /^=/ {
       if (di!="" && toupper(di)==toupper(want)) { printf("PK=%s\nDEVICEID=%s\n", pk, di); exit }
-      di=""; pk=""; in=1; next
+      di=""; pk=""; inrec=1; next
     }
-    /TXT records:/ { in=1; next }
-    in && /deviceid=/ {
+    /TXT records:/ { inrec=1; next }
+    inrec && /deviceid=/ {
       if (match($0, /deviceid=([0-9A-Fa-f:]+)/, m)) di=m[1]
     }
-    in && /pk=/ {
+    inrec && /pk=/ {
       if (match($0, /pk=([0-9A-Fa-f]+)/, p)) pk=p[1]
     }
     END{ if (di!="" && toupper(di)==toupper(want)) printf("PK=%s\nDEVICEID=%s\n", pk, di) }
@@ -162,7 +162,11 @@ main() {
   done
   # Expected deviceid: prefer shairport config hardware_address; else RAOP instance prefix
   expected_dev="$(hwaddr_from_conf || true)"
-  if [[ -z "$expected_dev" && -n "$raop_prefix" ]]; then expected_dev="$(colonize_mac "$raop_prefix")"; fi
+  local raop_dev=""
+  if [[ -n "$raop_prefix" ]]; then raop_dev="$(colonize_mac "$raop_prefix")"; fi
+  if [[ -z "$expected_dev" && -n "$raop_dev" ]]; then expected_dev="$raop_dev"; fi
+  # If configured hardware_address disagrees with current RAOP prefix, prefer RAOP observation
+  if [[ -n "$expected_dev" && -n "$raop_dev" && "${expected_dev,,}" != "${raop_dev,,}" ]]; then expected_dev="$raop_dev"; fi
   if [[ -z "$expected_dev" ]]; then echo "ERROR: unable to determine expected deviceid" >&2; exit 4; fi
 
   sel=$(select_ap2_by_deviceid "$expected_dev")

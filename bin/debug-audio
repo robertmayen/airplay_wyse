@@ -358,7 +358,7 @@ say "Collecting diagnostics..."
   fi
   # TXT identity
   if [[ -x "$(dirname "$0")/verify-airplay-identity" ]]; then
-    if out=$("$(dirname "$0")/verify-airplay-identity" --wait 1 2>/dev/null); then
+    if out=$("$(dirname "$0")/verify-airplay-identity" --wait 5 2>/dev/null); then
       pklen=$(echo "$out" | awk -F'len=' '{print $2}' | tr -dc '0-9')
       echo " - TXT: deviceid OK, pk length=${pklen:-unknown}"
     else
