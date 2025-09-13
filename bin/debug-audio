@@ -119,13 +119,13 @@ wifi_station_brief() {
   [[ -n "$bssid" ]] || return 0
   info=$(iw dev "$iface" station get "$bssid" 2>/dev/null || iw dev "$iface" station dump 2>/dev/null)
   [[ -n "$info" ]] || return 0
-  connected=$(echo "$info" | awk -F': *' '/connected time:/ {print $2; exit}')
-  retries=$(echo "$info" | awk -F': *' '/tx retries:/ {print $2; exit}')
-  failed=$(echo "$info" | awk -F': *' '/tx failed:/ {print $2; exit}')
-  blost=$(echo "$info" | awk -F': *' '/beacon loss:/ {print $2; exit}')
-  sigavg=$(echo "$info" | awk -F': *' '/signal avg:/ {print $2; exit}')
+  connected=$(echo "$info" | awk -F': *' '/connected time:/ {print $2; exit}' | awk '{print $1}')
+  retries=$(echo "$info" | awk -F': *' '/tx retries:/ {print $2; exit}' | awk '{print $1}')
+  failed=$(echo "$info" | awk -F': *' '/tx failed:/ {print $2; exit}' | awk '{print $1}')
+  blost=$(echo "$info" | awk -F': *' '/beacon loss:/ {print $2; exit}' | awk '{print $1}')
+  sigavg=$(echo "$info" | awk -F': *' '/signal avg:/ {print $2; exit}' | awk '{print $1}')
   if [[ -n "$retries$failed$blost$sigavg$connected" ]]; then
-    echo "bssid=$bssid signal_avg=${sigavg:-n/a}dBm tx_retries=${retries:-n/a} tx_failed=${failed:-n/a} beacon_loss=${blost:-n/a} connected=${connected:-n/a}s"
+    echo "bssid=$bssid signal_avg=${sigavg:-n/a}dBm tx_retries=${retries:-n/a} tx_failed=${failed:-n/a} beacon_loss=${blost:-n/a} connected_s=${connected:-n/a}"
   fi
 }
 
@@ -196,7 +196,7 @@ wifi_survey_util() {
 ping_jitter() {
   local host="$1" cnt="${2:-30}" interval="${3:-0.2}" timeout="${4:-10}"
   local out loss avg mdev vals
-  out=$(ping -n -q -c "$cnt" -i "$interval" -w "$timeout" "$host" 2>/dev/null || true)
+  out=$(LC_ALL=C ping -n -q -c "$cnt" -i "$interval" -w "$timeout" "$host" 2>/dev/null || true)
   loss=$(echo "$out" | awk -F', *' '/packets transmitted/ { for(i=1;i<=NF;i++) if ($i ~ /packet loss/) { if (match($i, /([0-9.]+)%/, m)) { print m[1] } } }')
   read avg mdev < <(echo "$out" | awk '/rtt/ { split($0,x,"="); gsub(/^ +| +$/,"",x[2]); sub(/ ms$/, "", x[2]); split(x[2],a,"/"); if (a[2] != "") printf "%s %s\n", a[2], a[4]; }')
   if [[ -n "${loss:-}" || -n "${mdev:-}" || -n "${avg:-}" ]]; then
