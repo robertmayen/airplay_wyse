@@ -61,12 +61,32 @@ main() {
   primary_if="${iface:-$(primary_iface || true)}"
   mac="${hwaddr:-$(derive_hwaddr_from_iface "$primary_if" || true)}"
   if [[ -z "$name" ]]; then name="$(default_airplay_name "$mac")"; fi
-  if [[ -z "$device" ]]; then
-    if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
-      device="$($REPO_DIR/bin/alsa-probe || true)"; device="${device:-hw:0,0}"
+  # Generate/update ALSA policy and default device; use ALSA default in Shairport
+  local policy_json anchor interp output_rate soxr_required
+  if [[ -x "$REPO_DIR/bin/alsa-policy-ensure" ]]; then
+    policy_json=$("$REPO_DIR/bin/alsa-policy-ensure")
+    anchor=$(printf '%s' "$policy_json" | awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' | tr -dc '0-9')
+    soxr_required=$(printf '%s' "$policy_json" | awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' | tr -dc '0-9')
+    device="default"
+    output_rate="${anchor:-}"
+    if [[ "${soxr_required:-0}" -eq 1 ]]; then
+      if shairport-sync -V 2>&1 | grep -q soxr; then
+        interp="soxr"
+      else
+        die "hardware anchored at 48k but shairport-sync lacks libsoxr; rebuild with --with-soxr or install proper package"
+      fi
     else
-      device="hw:0,0"
+      if shairport-sync -V 2>&1 | grep -q soxr; then interp="soxr"; else interp=""; fi
     fi
+  else
+    if [[ -z "$device" ]]; then
+      if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
+        device="$($REPO_DIR/bin/alsa-probe || true)"; device="${device:-hw:0,0}"
+      else
+        device="hw:0,0"
+      fi
+    fi
+    output_rate=""; interp=""
   fi
   # Self-heal identity if this looks like a cloned image
   maybe_reset_identity "$mac"
@@ -76,7 +96,7 @@ main() {
   # Enable statistics if AIRPLAY_WYSE_DEBUG is set
   stats=""
   if [[ "${AIRPLAY_WYSE_DEBUG:-0}" == "1" ]]; then stats="yes"; fi
-  render_conf "$name" "$device" "${mixer:-}" "" "" "" "${stats:-}"
+  render_conf "$name" "$device" "${mixer:-}" "" "" "" "${output_rate:-}" "${stats:-}" "${interp:-}"
 
   # Ensure identity fields are present immediately (not just on next boot)
   if [[ -x "/usr/local/libexec/airplay_wyse/identity-ensure" ]]; then

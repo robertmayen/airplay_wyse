@@ -11,6 +11,7 @@ Components
 - `bin/setup` (root): installs packages, installs hardened shairport override, writes `/etc/shairport-sync.conf`, enables services.
 - `bin/apply` (root): reapplies config when name/ALSA settings change and restarts shairport.
 - `bin/alsa-probe`: resolves a suitable `hw:<card>,<device>` string with USB preference.
+- `bin/alsa-policy-ensure` (root): probes DAC capabilities and generates `/etc/asound.conf` with a deterministic chain `plug -> softvol -> dmix -> hw`, anchored at either 44.1 kHz (AirPlay‑native) or 48 kHz (hardware‑native + soxr). Writes `/var/lib/airplay_wyse/alsa-policy.json` with the fingerprint and selected mode.
 - Optional inventory hints in `inventory/hosts/<short-hostname>.yml` for ALSA.
  - Identity management in `bin/lib.sh`: derives a unique default name from MAC and self-heals cloned images by resetting AirPlay 2 identity on first-run/fingerprint change. A one-shot unit (`airplay-wyse-identity.service`) enforces this before `shairport-sync` starts.
 
@@ -22,7 +23,17 @@ Security
 
 Notes
 - If Shairport is built locally, setup writes a drop‑in to use `/usr/local/bin/shairport-sync`.
- - Identity state lives in `/var/lib/shairport-sync/` (managed by shairport) and `/var/lib/airplay_wyse/instance.json` (fingerprint). The latter avoids cross-host key duplication.
+- Identity state lives in `/var/lib/shairport-sync/` (managed by shairport) and `/var/lib/airplay_wyse/instance.json` (fingerprint). The latter avoids cross-host key duplication.
+- ALSA policy state lives in `/var/lib/airplay_wyse/alsa-policy.json` and `/etc/asound.conf`. The policy is idempotent and regenerates only when the device fingerprint changes (card id/device num/anchor/format).
+
+Anchoring modes
+- 44.1‑anchored (default): selected if the DAC natively supports 44,100 Hz. AirPlay 2 audio (44.1 kHz) flows bit‑stably to ALSA without resampling; other clients are converted by the `plug` layer into the anchored dmix at 44.1 kHz.
+- 48‑anchored + soxr: selected when the device does not support 44.1 kHz (e.g., HDMI‑only sinks). Shairport is configured to use libsoxr interpolation and `output_rate = 48000` to preserve sync and quality; ALSA is anchored at 48 kHz for multi‑client stability.
+
+Why this design
+- Predictable, minimal stack: ALSA‑only policy centered around dmix provides deterministic mixing with a fixed clock domain.
+- AirPlay‑first: 44.1 kHz is favored to keep the AirPlay path resampling‑free when the hardware allows it.
+- Clone‑safe: policy generation uses stable card IDs, not indices; unit ordering ensures the policy is in place before Shairport starts.
 
 Operations
 - Install once: `sudo ./bin/setup`

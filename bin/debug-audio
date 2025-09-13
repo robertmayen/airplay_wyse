@@ -269,7 +269,7 @@ main() {
   systemctl is-active --quiet shairport-sync && echo "active" || echo "inactive"
   systemctl is-enabled --quiet shairport-sync && echo "enabled" || echo "disabled"
 
-  say "Config excerpts:"
+say "Config excerpts:"
   diag_stats=$(awk 'BEGIN{IGNORECASE=1}
     /^diagnostics[[:space:]]*=/{insec=1}
     insec && /statistics[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
@@ -282,6 +282,31 @@ main() {
   ' "$CONF" 2>/dev/null || true)
   echo "[general] interface=$(iface_from_conf || echo unset) diagnostics.statistics=${diag_stats:-unset} general.statistics=${gen_stats:-unset}"
   echo "[alsa] device=$(device_from_conf || echo unset)"
+
+  # ALSA policy anchor and chain
+  say "ALSA anchor & chain:"
+  if [[ -f /var/lib/airplay_wyse/alsa-policy.json ]]; then
+    local aj anchor mode fmt devnum cardid
+    aj=/var/lib/airplay_wyse/alsa-policy.json
+    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+    fmt=$(awk -F'"' '/"format"/{print $4; exit}' "$aj")
+    devnum=$(awk -F'[,:}]' '/"device_num"/{for(i=1;i<=NF;i++) if ($i ~ /"device_num"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+    cardid=$(awk -F'"' '/"card_id"/{print $4; exit}' "$aj")
+    if [[ -n "$anchor" ]]; then
+      if [[ "$anchor" == "44100" ]]; then echo "anchor=44100 (AirPlay-native), fmt=${fmt:-?}, card=${cardid:-?},dev=${devnum:-?}"; else echo "anchor=48000 (+soxr), fmt=${fmt:-?}, card=${cardid:-?},dev=${devnum:-?}"; fi
+    fi
+  fi
+  if [[ -f /etc/asound.conf ]]; then
+    # quick chain verification: plug -> softvol -> dmix -> hw
+    local ok_plug ok_soft ok_dmix ok_hw
+    ok_plug=$(grep -qi 'pcm.!default' /etc/asound.conf && grep -qi 'type[[:space:]]\+plug' /etc/asound.conf && echo OK || echo NO)
+    ok_soft=$(grep -qi 'pcm._aw_softvol' /etc/asound.conf && echo OK || echo NO)
+    ok_dmix=$(grep -qi 'pcm._aw_dmix' /etc/asound.conf && echo OK || echo NO)
+    ok_hw=$(grep -qi 'pcm._aw_hw' /etc/asound.conf && echo OK || echo NO)
+    echo "chain: plug=${ok_plug} softvol=${ok_soft} dmix=${ok_dmix} hw=${ok_hw}"
+  else
+    echo "(no /etc/asound.conf found)"
+  fi
 
   say "AP2/RAOP identity check:"
   if [[ -x "$(dirname "$0")/verify-airplay-identity" ]]; then
@@ -315,6 +340,15 @@ main() {
       echo "OK: $dev opened at 44.1k" || warn "$dev did not open at 44.1k"
   fi
   fi
+
+  # Interpolation check
+  local interp_conf
+  interp_conf=$(awk 'BEGIN{IGNORECASE=1}
+    /^alsa[[:space:]]*=/{insec=1}
+    insec && /interpolation[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
+    insec && /^};/ {insec=0}
+  ' "$CONF" 2>/dev/null || true)
+  if [[ -n "$interp_conf" ]]; then echo "[alsa] interpolation=${interp_conf}"; fi
 
   local iface
   iface="$(iface_guess)"

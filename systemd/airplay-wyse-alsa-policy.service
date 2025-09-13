@@ -1,0 +1,16 @@
+[Unit]
+Description=AirPlay Wyse ALSA Policy Ensure
+Documentation=https://github.com/robertmayen/airplay_wyse
+Wants=network-online.target
+After=network-online.target
+Before=shairport-sync.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/airplay_wyse/alsa-policy-ensure
+RemainAfterExit=yes
+ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/alsa-policy-ensure
+
+[Install]
+WantedBy=multi-user.target
+

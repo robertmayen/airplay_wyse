@@ -12,7 +12,7 @@ lint:
 	@bash ./tools/lints.sh || true
 
 test:
-	@./bin/test-airplay2 --no-strict || true
+	@./bin/test-airplay2 --alsa --no-strict || true
 
 setup:
 	@sudo ./bin/setup

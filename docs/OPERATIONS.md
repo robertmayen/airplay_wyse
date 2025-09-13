@@ -25,7 +25,12 @@ Options:
 
 Validate after setup:
 ```
-./bin/test-airplay2
+  ./bin/test-airplay2
+```
+
+If your sink is 48 kHz‑only (e.g., HDMI), ensure Shairport has libsoxr:
+```
+shairport-sync -V | grep soxr || echo "Rebuild with --with-soxr or install proper package"
 ```
 
 ## Update Configuration
@@ -117,6 +122,19 @@ Note on NQPTP
 - `systemctl is-active nqptp` returns `active`.
 - `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp` (or `_raop._tcp`).
 - `bin/alsa-probe` returns an ALSA device string and `aplay -D <device>` can open it (busy tolerated).
+
+Resampling & drift
+- ALSA policy is generated at apply‑time and on boot if the hardware fingerprint changes:
+  - 44.1‑anchored mode: `dmix` runs at 44,100 Hz; AirPlay audio avoids resampling. Shairport may enable `interpolation = "soxr"` if available, but it is not required.
+  - 48‑anchored mode: `dmix` runs at 48,000 Hz; Shairport sets `interpolation = "soxr"` and `output_rate = 48000` to convert 44.1 → 48 with high quality and stable sync. This mode is used when the DAC does not support 44.1 kHz natively.
+- The default ALSA device is the anchored chain `plug -> softvol -> dmix -> hw` so all clients share the same policy.
+- Inspect current mode:
+  - `cat /var/lib/airplay_wyse/alsa-policy.json`
+  - `./bin/debug-audio` prints: `anchor=44100` or `anchor=48000 (+soxr)` and verifies the chain.
+
+Diagnostics
+- `./bin/test-airplay2 --alsa` prints the anchor and validates that Shairport points to `output_device = "default"`.
+- Optional drift sanity check while playing: `./bin/test-airplay2 --drift 5m` monitors stuffing/sync/resync events and fails if they exceed a conservative threshold.
 - Debugging
 - To enable extra runtime statistics in Shairport logs and run extensive checks, set:
   - `sudo sh -c 'echo AIRPLAY_WYSE_DEBUG=1 >> /etc/default/airplay_wyse'`

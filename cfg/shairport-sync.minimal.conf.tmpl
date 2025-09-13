@@ -23,4 +23,8 @@ alsa = {
   output_device = "{{ALSA_DEVICE}}";
   // Optional: removed if unset
   mixer_control_name = "{{ALSA_MIXER}}";
+  // Optional: removed if unset; when set, Shairport will resample to this for hardware-anchored sinks.
+  output_rate = {{ALSA_OUTPUT_RATE}};
+  // Optional: removed if unset; set to "soxr" when compiled with libsoxr and 48 kHz anchor is selected.
+  interpolation = "{{INTERPOLATION}}";
 };

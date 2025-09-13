@@ -11,10 +11,11 @@ SHOW_LOGS=0
 SHOW_MDNS=0
 SHOW_ALSA=0
 STRICT=1
+DRIFT_DUR=""
 
 usage() {
   cat <<EOF
-Usage: ./bin/test-airplay2 [--logs] [--mdns] [--alsa] [--no-strict]
+Usage: ./bin/test-airplay2 [--logs] [--mdns] [--alsa] [--no-strict] [--drift <duration>]
 
 Default runs strict functionality checks (nqptp, shairport, mDNS, ALSA listing).
 
@@ -22,6 +23,7 @@ Default runs strict functionality checks (nqptp, shairport, mDNS, ALSA listing).
   --mdns       Show detailed avahi-browse output for _airplay._tcp and _raop._tcp
   --alsa       Show ALSA cards and attempt basic listing
   --no-strict  Do not exit non-zero on failures (report only)
+  --drift D    Run a bounded drift sanity check while playing (e.g., 60s, 5m)
 EOF
 }
 
@@ -32,11 +34,53 @@ parse_args() {
       --mdns) SHOW_MDNS=1 ;;
       --alsa) SHOW_ALSA=1 ;;
       --no-strict) STRICT=0 ;;
+      --drift) shift; DRIFT_DUR="${1:-}" ;;
       -h|--help) usage; exit 0 ;;
       *) fail "unknown argument: $1" ;;
     esac
     shift || true
   done
+}
+
+duration_to_seconds() {
+  local d="$1"
+  if [[ -z "$d" ]]; then echo 0; return 0; fi
+  if [[ "$d" =~ ^[0-9]+$ ]]; then echo "$d"; return 0; fi
+  if [[ "$d" =~ ^([0-9]+)s$ ]]; then echo "${BASH_REMATCH[1]}"; return 0; fi
+  if [[ "$d" =~ ^([0-9]+)m$ ]]; then echo $(( ${BASH_REMATCH[1]} * 60 )); return 0; fi
+  echo "$d"
+}
+
+run_drift_check() {
+  local duration="$1"
+  [[ -n "$duration" ]] || return 0
+  local secs
+  secs=$(duration_to_seconds "$duration")
+  [[ "$secs" =~ ^[0-9]+$ ]] || { log "invalid --drift duration '$duration'"; return 0; }
+  log "Drift sanity check for ${secs}s (expect playback active)"
+  local c_stuff=0 c_sync=0 c_resync=0 c_xrun=0 c_und=0 c_over=0 saw_lines=0
+  local line lcl
+  while IFS= read -r line; do
+    lcl=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')
+    [[ "$lcl" == *"stuffing"* ]] && ((c_stuff++))
+    [[ "$lcl" == *"sync error"* ]] && ((c_sync++))
+    { [[ "$lcl" == *"resync"* ]] || [[ "$lcl" == *"flush"* ]]; } && ((c_resync++))
+    [[ "$lcl" == *"underrun"* ]] && ((c_und++))
+    [[ "$lcl" == *"overrun"* ]] && ((c_over++))
+    [[ "$lcl" == *"xrun"* ]] && ((c_xrun++))
+    ((saw_lines++))
+  done < <(timeout "$secs" journalctl -f -u shairport-sync --no-pager -o short-iso 2>&1 || true)
+  log "Drift summary: stuffing=$c_stuff sync_error=$c_sync resync/flush=$c_resync xruns=$c_xrun underrun=$c_und overrun=$c_over"
+  if [[ $saw_lines -eq 0 ]]; then
+    log "⚠ no shairport logs captured; ensure playback is active during drift check"
+    return 0
+  fi
+  # Heuristics: minimal stuffing/sync_error/resync expected over short windows
+  local threshold=$(( secs / 30 + 2 ))
+  # Allow small counts, fail if egregious
+  if (( c_resync > threshold || c_sync > threshold*2 )); then
+    soft_or_fail "excessive resync/sync_error observed during drift check" false
+  fi
 }
 
 soft_or_fail() {
@@ -106,6 +150,20 @@ test_alsa_device() {
     return 0
   fi
   log "✓ ALSA audio devices are present"
+  # Anchor mode and policy checks
+  if [[ -f /var/lib/airplay_wyse/alsa-policy.json ]]; then
+    local aj anchor soxr_required devname chain_ok
+    aj=/var/lib/airplay_wyse/alsa-policy.json
+    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+    soxr_required=$(awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+    if [[ -n "$anchor" ]]; then
+      if [[ "$anchor" == "44100" ]]; then
+        log "ALSA policy: anchor=44100 (AirPlay-native)"
+      else
+        log "ALSA policy: anchor=48000 (+soxr)"
+      fi
+    fi
+  fi
 }
 
 show_logs() {
@@ -145,6 +203,28 @@ show_alsa() {
   fi
 }
 
+check_policy_and_soxr() {
+  # Confirm Shairport uses ALSA default device and soxr is present when required
+  local conf_dev soxr_built anchor soxr_required aj
+  conf_dev=$(awk 'BEGIN{IGNORECASE=1}
+    /^alsa[[:space:]]*=/{insec=1}
+    insec && /output_device[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
+    insec && /^};/ {insec=0}
+  ' /etc/shairport-sync.conf 2>/dev/null || true)
+  if [[ -n "$conf_dev" ]]; then
+    soft_or_fail "shairport output_device should be 'default' (got '$conf_dev')" bash -c "[[ '$conf_dev' == 'default' ]]"
+  fi
+  aj=/var/lib/airplay_wyse/alsa-policy.json
+  if [[ -f "$aj" ]]; then
+    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+    soxr_required=$(awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+  fi
+  if shairport-sync -V 2>&1 | grep -q soxr; then soxr_built=1; else soxr_built=0; fi
+  if [[ "${soxr_required:-0}" -eq 1 ]]; then
+    soft_or_fail "anchor=48000 requires libsoxr support in shairport-sync" bash -c "[[ ${soxr_built} -eq 1 ]]"
+  fi
+}
+
 main() {
   parse_args "$@"
   log "Starting AirPlay 2 checks..."
@@ -159,9 +239,11 @@ main() {
     fi
   fi
   test_alsa_device
+  check_policy_and_soxr
   [[ $SHOW_LOGS -eq 1 ]] && show_logs || true
   [[ $SHOW_MDNS -eq 1 ]] && show_mdns || true
   [[ $SHOW_ALSA -eq 1 ]] && show_alsa || true
+  [[ -n "${DRIFT_DUR:-}" ]] && run_drift_check "$DRIFT_DUR" || true
   log "✓ Checks complete"
   log "Device should be discoverable as an AirPlay receiver"
 }

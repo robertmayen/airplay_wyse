@@ -19,8 +19,10 @@ systemctl daemon-reload
 log "enable airplay-wyse-identity.service"
 systemctl enable airplay-wyse-identity.service || true
 
+log "enable airplay-wyse-alsa-policy.service"
+systemctl enable airplay-wyse-alsa-policy.service || true
+
 log "restart shairport-sync"
 systemctl restart shairport-sync.service || true
 
 log "done"
-
