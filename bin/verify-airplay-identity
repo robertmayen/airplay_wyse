@@ -157,7 +157,7 @@ main() {
   max_attempts=$(( wait_secs>0 ? wait_secs : 1 ))
   while :; do
     raop_prefix=$(raop_prefix_from_dump || true)
-    if [[ -n "$raop_prefix" ]]; then break; fi
+    if [[ -n "$raop_prefix" || $attempts -ge $((max_attempts-1)) ]]; then break; fi
     sleep 1; attempts=$((attempts+1))
   done
   # Expected deviceid: prefer shairport config hardware_address; else RAOP instance prefix
