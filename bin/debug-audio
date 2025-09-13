@@ -138,6 +138,70 @@ show_shairport_sched() {
   fi
 }
 
+# Gateway and Wi‑Fi jitter diagnostics
+default_gateway() {
+  ip route 2>/dev/null | awk '/^default/ {print $3; exit}'
+}
+
+wifi_link_brief() {
+  local iface="$1"
+  iw dev "$iface" link 2>/dev/null | awk 'BEGIN{sig="";rx="";tx=""}
+    /signal:/ {sig=$2}
+    /rx bitrate:/ {rx=$3$4}
+    /tx bitrate:/ {tx=$3$4}
+    END{ if(sig!="" || rx!="" || tx!="") printf("signal=%s dBm rx=%s tx=%s\n", sig, rx, tx) }'
+}
+
+wifi_survey_util() {
+  local iface="$1" secs="${2:-2}"
+  command -v iw >/dev/null 2>&1 || { echo "util=unknown"; return 0; }
+  local a1 b1 a2 b2
+  read a1 b1 < <(iw dev "$iface" survey dump 2>/dev/null | awk 'BEGIN{inuse=0;a=b=0}
+    /in use/ {inuse=1}
+    inuse && /channel time:/ {a=$3}
+    inuse && /busy time:/ {b=$3}
+    END{print a,b}')
+  sleep "$secs"
+  read a2 b2 < <(iw dev "$iface" survey dump 2>/dev/null | awk 'BEGIN{inuse=0;a=b=0}
+    /in use/ {inuse=1}
+    inuse && /channel time:/ {a=$3}
+    inuse && /busy time:/ {b=$3}
+    END{print a,b}')
+  if [[ -n "${a1:-}" && -n "${a2:-}" && "$a2" -gt "$a1" ]]; then
+    local da=$((a2-a1)) db=$((b2-b1))
+    local pct=$(( 100*db/da ))
+    echo "util=${pct}% (window ${secs}s)"
+  else
+    echo "util=unknown"
+  fi
+}
+
+ping_jitter() {
+  local host="$1" cnt="${2:-30}" interval="${3:-0.2}" timeout="${4:-10}"
+  local out loss mdev avg
+  out=$(ping -n -q -c "$cnt" -i "$interval" -w "$timeout" "$host" 2>/dev/null || true)
+  loss=$(echo "$out" | awk -F', ' '/packets transmitted/ { for(i=1;i<=NF;i++) if ($i ~ /packet loss/) { sub(/%.*/,"",$i); sub(/.* /,"",$i); print $i } }')
+  avg=$(echo "$out" | awk -F'/' '/rtt/ {gsub(/ ms/,"",$2); print $2}')
+  mdev=$(echo "$out" | awk -F'/' '/rtt/ {gsub(/ ms/,"",$4); print $4}')
+  if [[ -n "${loss:-}" || -n "${mdev:-}" || -n "${avg:-}" ]]; then
+    echo "loss=${loss:-n/a}% rtt_avg=${avg:-n/a}ms jitter_mdev=${mdev:-n/a}ms"
+  else
+    echo "(ping summary unavailable)"
+  fi
+}
+
+show_wifi_jitter() {
+  local iface="$1" gw
+  [[ -n "$iface" ]] || return 0
+  if ! iw dev "$iface" info >/dev/null 2>&1; then return 0; fi
+  say "Wi‑Fi link: $(wifi_link_brief "$iface")"
+  say "Wi‑Fi channel util: $(wifi_survey_util "$iface" 2)"
+  gw=$(default_gateway || true)
+  if [[ -n "$gw" ]]; then
+    say "Gateway ping (30x, 200ms interval): $(ping_jitter "$gw" 30 0.2 10)"
+  fi
+}
+
 live_capture() {
   # Stream logs for a bounded duration, summarize key events; do not write files.
   local dursecs="$1" iface
@@ -255,6 +319,7 @@ main() {
   local iface
   iface="$(iface_guess)"
   show_iface_details "$iface"
+  show_wifi_jitter "$iface"
   show_nqptp_status
   show_shairport_sched
 
