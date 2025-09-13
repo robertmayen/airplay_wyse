@@ -149,6 +149,10 @@ install_identity_program() {
   install -d -m 0755 "$IDENTITY_LIBEXEC_DIR"
   install -m 0755 "$IDENTITY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/identity-ensure"
   install -m 0644 "$IDENTITY_LIB_SRC" "$IDENTITY_LIBEXEC_DIR/lib.sh"
+  # ALSA preflight checker
+  if [[ -f "$REPO_DIR/bin/preflight-alsa" ]]; then
+    install -m 0755 "$REPO_DIR/bin/preflight-alsa" "$IDENTITY_LIBEXEC_DIR/preflight-alsa"
+  fi
   # Optional environment override file for interface selection, etc.
   if [[ ! -f "$DEFAULT_ENV_FILE" ]]; then
     cat >"$DEFAULT_ENV_FILE" <<'EOF'
@@ -173,18 +177,46 @@ main() {
   iface="${AVAHI_IFACE:-}"
   local hwaddr="${HW_ADDR:-}"
 
-  # Determine ALSA device: prefer explicit env, else alsa-probe, else hw:0,0
+  # Determine ALSA device: prefer explicit env, else alsa-probe (44.1k hw), else create plug wrapper to fallback hw
   if [[ -n "${ALSA_DEVICE:-}" ]]; then
     device="$ALSA_DEVICE"
   elif [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
-    device="$($REPO_DIR/bin/alsa-probe || true)"
-    device="${device:-hw:0,0}"
+    if pj="$("$REPO_DIR/bin/alsa-probe")"; then
+      if command -v jq >/dev/null 2>&1; then
+        device="$(echo "$pj" | jq -r '.path')"
+      else
+        device=$(echo "$pj" | awk -F'"' '/"path"[[:space:]]*:/ {print $4; exit}')
+      fi
+      device="${device:-hw:0,0}"
+    else
+      # Try plug wrapper to fallback hw (accepts 44.1k at boundary)
+      fallback_dev=""
+      if [[ -e /proc/asound/card0/pcm0p ]]; then fallback_dev="hw:0,0"; fi
+      for h in 3 7 8; do
+        [[ -e "/proc/asound/card0/pcm${h}p" ]] && { fallback_dev="hw:0,${h}"; break; }
+      done
+      if [[ -n "$fallback_dev" ]]; then
+        plug_name="aw_plug_44k_$(echo "$fallback_dev" | tr -cd '0-9_,')"
+        install -d -m 0755 /etc/asound.d
+        cat >/etc/asound.d/airplay_wyse.conf <<EOF
+pcm.${plug_name} {
+  type plug
+  slave.pcm "${fallback_dev}"
+}
+EOF
+        device="$plug_name"
+      else
+        err=$(echo "$pj" | awk -F'"' '/"error"[[:space:]]*:/ {print $4; exit}')
+        die "no 44.1k-capable ALSA sink: ${err:-probe failed}; attach a USB DAC or choose analog; HDMI is often 48k-only"
+      fi
+    fi
   else
     device="hw:0,0"
   fi
 
   log "ensuring AirPlay 2 stack (shairport-sync + nqptp)"
   ensure_pkg jq || true
+  ensure_pkg alsa-utils || true
   ensure_nqptp
   ensure_shairport_ap2
 

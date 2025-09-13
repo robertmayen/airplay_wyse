@@ -63,7 +63,35 @@ main() {
   if [[ -z "$name" ]]; then name="$(default_airplay_name "$mac")"; fi
   if [[ -z "$device" ]]; then
     if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
-      device="$($REPO_DIR/bin/alsa-probe || true)"; device="${device:-hw:0,0}"
+      if pj="$("$REPO_DIR/bin/alsa-probe")"; then
+        if command -v jq >/dev/null 2>&1; then
+          device="$(echo "$pj" | jq -r '.path')"
+        else
+          device=$(echo "$pj" | awk -F'"' '/"path"[[:space:]]*:/ {print $4; exit}')
+        fi
+        device="${device:-hw:0,0}"
+      else
+        # Try plug wrapper fallback
+        fallback_dev=""
+        if [[ -e /proc/asound/card0/pcm0p ]]; then fallback_dev="hw:0,0"; fi
+        for h in 3 7 8; do
+          [[ -e "/proc/asound/card0/pcm${h}p" ]] && { fallback_dev="hw:0,${h}"; break; }
+        done
+        if [[ -n "$fallback_dev" ]]; then
+          plug_name="aw_plug_44k_$(echo "$fallback_dev" | tr -cd '0-9_,')"
+          install -d -m 0755 /etc/asound.d
+          cat >/etc/asound.d/airplay_wyse.conf <<EOF
+pcm.${plug_name} {
+  type plug
+  slave.pcm "${fallback_dev}"
+}
+EOF
+          device="$plug_name"
+        else
+          err=$(echo "$pj" | awk -F'"' '/"error"[[:space:]]*:/ {print $4; exit}')
+          die "no 44.1k-capable ALSA sink: ${err:-probe failed}; attach a USB DAC or choose analog; HDMI is often 48k-only"
+        fi
+      fi
     else
       device="hw:0,0"
     fi

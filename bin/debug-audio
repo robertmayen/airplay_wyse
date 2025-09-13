@@ -39,6 +39,64 @@ device_from_conf() {
   ' "$CONF" 2>/dev/null || true
 }
 
+device_is_dmix_or_default() {
+  local dev="$1"
+  [[ -z "$dev" ]] && return 1
+  case "$dev" in
+    default|default:*) return 0 ;;
+    dmix:*|plughw:*) return 0 ;;
+  esac
+  # Inspect aplay -L block if present
+  if command -v aplay >/dev/null 2>&1; then
+    local block
+    block=$(aplay -L 2>/dev/null | awk -v d="$dev" 'BEGIN{p=0} $0==d {p=1;print;next} p {print} /^$/ {p=0}')
+    if echo "$block" | grep -qiE '\bdmix\b|\bdefault\b'; then return 0; fi
+  fi
+  return 1
+}
+
+extract_fps_window() {
+  # Prints last up to 12 Output FPS (r) values, one per line
+  journalctl -u shairport-sync -n 500 --no-pager 2>/dev/null | \
+    awk -F'|' '/\|/ { last=$0 } END{ print last }' | sed -n '1p' >/dev/null || true
+  journalctl -u shairport-sync -n 500 --no-pager 2>/dev/null | \
+    awk -F'|' 'BEGIN{c=0} /\|/ {fps=$4; gsub(/^ +| +$/, "", fps); if (fps!="" && fps ~ /^[0-9.]+$/) { print fps; c++; if(c>=12) exit }}'
+}
+
+print_sink_rate_status() {
+  local arr=() v maxdev=0 latest=""
+  while IFS= read -r v; do arr+=("$v"); done < <(extract_fps_window || true)
+  if [[ ${#arr[@]} -eq 0 ]]; then echo "Output FPS unavailable (enable diagnostics.statistics=yes)"; return 0; fi
+  latest="${arr[0]}"
+  for v in "${arr[@]}"; do
+    d=$(awk -v f="$v" 'BEGIN{d=f-44100; if(d<0)d=-d; printf "%.6f", d}')
+    pct=$(awk -v f="$v" 'BEGIN{d=f-44100; if(d<0)d=-d; printf "%.6f", (d/44100)*100}')
+    awk -v p="$pct" -v m="$maxdev" 'BEGIN{ if ((p+0.0) > (m+0.0)) print p; else print m }' >/dev/null 2>&1 || true
+    if awk -v p="$pct" -v m="$maxdev" 'BEGIN{ exit ( (p+0.0) > (m+0.0) ? 0 : 1 ) }'; then maxdev="$pct"; fi
+  done
+  if awk -v m="$maxdev" 'BEGIN{ exit ( (m+0.0) > 0.5 ? 0 : 1 ) }'; then
+    echo "SINK NOT AT 44.1k (Output FPS ≈ ${latest}; dev=${maxdev}% over recent window)"
+  else
+    echo "Sink rate OK: Output FPS ≈ ${latest}"
+  fi
+}
+
+active_hw_params() {
+  local dev="$1" card d sub base
+  [[ "$dev" =~ ^hw:([0-9]+),([0-9]+)$ ]] || return 1
+  card="${BASH_REMATCH[1]}"; d="${BASH_REMATCH[2]}"; base="/proc/asound/card${card}/pcm${d}p"
+  for sub in "$base"/sub*; do
+    [[ -f "$sub/status" ]] || continue
+    if grep -q '^state: *RUNNING' "$sub/status" 2>/dev/null; then
+      echo "$sub/hw_params"
+      return 0
+    fi
+  done
+  # If none running, provide any existing hw_params for inspection
+  for sub in "$base"/sub*/hw_params; do [[ -f "$sub" ]] && { echo "$sub"; return 0; }; done
+  return 1
+}
+
 wifi_powersave() {
   local i="$1"
   command -v iw >/dev/null 2>&1 || { echo "unknown"; return 0; }
@@ -325,14 +383,33 @@ main() {
   local dev
   dev=$(device_from_conf || true)
   if [[ -n "$dev" ]]; then
-  say "Testing if device accepts 44.1k via ALSA plug (short 0dB sine):"
-  if command -v speaker-test >/dev/null 2>&1; then
-    timeout 3 speaker-test -D "$dev" -c 2 -r 44100 -t sine -l 1 >/dev/null 2>&1 && \
-      echo "OK: $dev opened at 44.1k" || warn "$dev did not open at 44.1k"
+  say "Testing if configured device opens at 44.1k (exclusive hw preferred):"
+  if [[ -x "$(dirname "$0")/alsa-probe" && "$dev" == hw:* ]]; then
+    if "$(dirname "$0")/alsa-probe" --validate "$dev"; then echo "OK: $dev opened at 44.1k"; else warn "$dev did not open at 44.1k"; fi
   else
-    timeout 3 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q 2>/dev/null && \
-      echo "OK: $dev opened at 44.1k" || warn "$dev did not open at 44.1k"
+    timeout 2 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q 2>/dev/null && \
+      echo "OK: $dev opened (via plug) at 44.1k" || warn "$dev did not open at 44.1k"
   fi
+  if device_is_dmix_or_default "$dev"; then
+    warn "Configured PCM appears to resolve to dmix/default. This typically forces 48 kHz. Select a raw hw:<card>,<dev> sink."
+  fi
+  fi
+
+  say "Shairport statistics (Output FPS):"
+  print_sink_rate_status
+
+  if [[ -n "$dev" && "$dev" == hw:* ]]; then
+    local hwp
+    hwp=$(active_hw_params "$dev" || true)
+    if [[ -n "$hwp" && -f "$hwp" ]]; then
+      say "Active hw_params for $dev:"
+      awk '/^(rate|format|period_size):/{print}' "$hwp" 2>/dev/null || true
+      echo "(source: $hwp)"
+    fi
+  else
+    if [[ -n "$dev" ]]; then
+      say "Configured PCM is a named/plug device — boundary accepts 44.1k; underlying hw rate may differ."
+    fi
   fi
 
   local iface
@@ -343,8 +420,8 @@ main() {
   show_shairport_sched
 
   say "Done. Likely causes and hints:"
-  echo "- If logs show underruns/overruns: increase Wi‑Fi stability (reduce powersave), prefer Ethernet, or move AP closer."
-  echo "- If ALSA device can't open at 44.1k and you're not using a USB DAC, keep using plughw:<card>,<dev>."
+  echo "- If logs show underruns/overruns: improve Wi‑Fi stability (powersave/placement) or prefer Ethernet."
+  echo "- If Output FPS ~47xxx or device resolves to dmix/default: switch to a 44.1k-capable hw:<card>,<dev> sink or attach a USB DAC."
   echo "- If CPU% is high and soxr is used, consider reducing other load; Wyse 5070 usually handles it fine."
   echo "- If nqptp is frequently unlocking or large offsets appear, check LAN stability and any VM/clock virtualization."
 

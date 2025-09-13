@@ -14,6 +14,13 @@ Components
 - Optional inventory hints in `inventory/hosts/<short-hostname>.yml` for ALSA.
  - Identity management in `bin/lib.sh`: derives a unique default name from MAC and self-heals cloned images by resetting AirPlay 2 identity on first-run/fingerprint change. A one-shot unit (`airplay-wyse-identity.service`) enforces this before `shairport-sync` starts.
 
+## Clocking & Sample Rate
+- AirPlay is 44.1 kHz; shairport opens the sink at 44100 Hz.
+- Probe picks a 44.1k‑capable `hw:<card>,<dev>` (verified via `/proc/.../hw_params`).
+- Avoid `default`/`dmix` paths (often 48 kHz) — they cause drift/resyncs.
+- If only 48k hardware exists (typical HDMI), setup creates a named `plug` PCM so shairport still opens at 44.1k; ALSA resamples behind it.
+- Preflight (`preflight-alsa`) validates the configured PCM: `hw:` must show `rate: 44100` in procfs; `plug` must accept a 44.1k open.
+
 Security
 - Shairport runs as its vendor user with a hardened override:
   - NoNewPrivileges, ProtectSystem=strict, PrivateTmp, MemoryDenyWriteExecute, AF restrictions.

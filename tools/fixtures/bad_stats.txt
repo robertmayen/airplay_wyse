@@ -1,0 +1,3 @@
+Sync Error ms | Net Sync PPM | All Sync PPM | Output FPS (r) | Output FPS (c)
+0.015 | 0.00 | 0.00 | 47500.00 | 47500.00
+0.010 | 0.00 | 0.00 | 47165.00 | 47170.00

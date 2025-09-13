@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# preflight-alsa: Validate configured ALSA PCM before shairport starts.
+# - For hw:<c>,<d> require /proc/.../hw_params rate: 44100 while opened.
+# - For named/plug PCMs, require that opening at -r 44100 succeeds quickly.
+
+CONF="/etc/shairport-sync.conf"
+REPO_DIR="/opt/airplay_wyse"
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+err() { echo "$(ts) [preflight-alsa] $*" >&2; }
+
+read_device() {
+  awk 'BEGIN{IGNORECASE=1}
+    /^alsa[[:space:]]*=/{insec=1}
+    insec && /output_device[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
+    insec && /^};/ {insec=0}
+  ' "$CONF" 2>/dev/null || true
+}
+
+open_quick() {
+  local dev="$1"
+  timeout 0.25 aplay -D "$dev" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q >/dev/null 2>&1 || return 1
+  return 0
+}
+
+hw_params_path() {
+  local dev="$1" card d base
+  [[ "$dev" =~ ^hw:([0-9]+),([0-9]+)$ ]] || return 1
+  card="${BASH_REMATCH[1]}"; d="${BASH_REMATCH[2]}"; base="/proc/asound/card${card}/pcm${d}p"
+  for sub in "$base"/sub*; do
+    [[ -f "$sub/status" ]] || continue
+    if grep -q '^state: *RUNNING' "$sub/status" 2>/dev/null; then
+      echo "$sub/hw_params"; return 0
+    fi
+  done
+  # fallback to any
+  for sub in "$base"/sub*/hw_params; do [[ -f "$sub" ]] && { echo "$sub"; return 0; }; done
+  return 1
+}
+
+main() {
+  local dev hwp rate
+  dev="$(read_device || true)"
+  if [[ -z "$dev" ]]; then
+    err "shairport preflight: sink not 44.1k (no device) → see docs/OPERATIONS.md#Clocking"
+    exit 1
+  fi
+  if [[ "$dev" == hw:* ]]; then
+    # Require hardware 44.1k
+    open_quick "$dev" || { err "shairport preflight: sink not 44.1k (open failed) → see docs/OPERATIONS.md#clocking"; exit 2; }
+    hwp="$(hw_params_path "$dev" || true)"
+    if [[ -n "$hwp" && -f "$hwp" ]]; then
+      rate=$(awk '/^rate:/{print $2}' "$hwp" 2>/dev/null || true)
+      if [[ "$rate" != "44100" ]]; then
+        err "shairport preflight: sink not 44.1k (got ${rate:-unknown}) → see docs/OPERATIONS.md#clocking"
+        exit 3
+      fi
+    fi
+    exit 0
+  fi
+  # Named/plug PCMs: accept boundary open at 44.1k
+  open_quick "$dev" || { err "shairport preflight: sink not 44.1k (open failed) → see docs/OPERATIONS.md#clocking"; exit 4; }
+  exit 0
+}
+
+main "$@"
+

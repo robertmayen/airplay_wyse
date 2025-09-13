@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Hermetic script-level checks for 44.1k detection and error JSON.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+pass() { echo "PASS: $*"; }
+fail() { echo "FAIL: $*"; exit 1; }
+
+extract_latest_fps_r_from_file() {
+  local f="$1"
+  awk -F'|' 'NF>=5{last=$0} END{ if (last!="") { split(last,a,"|"); gsub(/^ +| +$/,"",a[4]); print a[4] } }' "$f"
+}
+
+deviation_pct() {
+  awk -v f="$1" 'BEGIN{d=f-44100; if(d<0)d=-d; printf "%.3f", (d/44100)*100}'
+}
+
+main() {
+  local good bad fps pct
+
+  good="$REPO_DIR/tools/fixtures/good_stats.txt"
+  bad="$REPO_DIR/tools/fixtures/bad_stats.txt"
+
+  [[ -f "$good" && -f "$bad" ]] || fail "fixtures missing"
+
+  fps=$(extract_latest_fps_r_from_file "$good")
+  [[ -n "$fps" ]] || fail "no FPS parsed from good fixture"
+  pct=$(deviation_pct "$fps")
+  awk -v p="$pct" -v f="$fps" 'BEGIN{ if (p+0.0 <= 0.5) { printf("OK good: FPS=%s (dev=%.3f%%)\n", f, p) } else { exit 1 } }' || fail "good fixture flagged red"
+  pass "good fixture within 0.5% (FPS=$fps dev=${pct}%)"
+
+  fps=$(extract_latest_fps_r_from_file "$bad")
+  [[ -n "$fps" ]] || fail "no FPS parsed from bad fixture"
+  pct=$(deviation_pct "$fps")
+  awk -v p="$pct" -v f="$fps" 'BEGIN{ if (p+0.0 > 0.5) { printf("OK bad: FPS=%s (dev=%.3f%%)\n", f, p) } else { exit 1 } }' || fail "bad fixture not flagged"
+  pass "bad fixture flagged (>0.5%) (FPS=$fps dev=${pct}%)"
+
+  # Procfs snapshot parsing
+  rp="$REPO_DIR/tools/fixtures/hw_params_44100.txt"
+  rb="$REPO_DIR/tools/fixtures/hw_params_48000.txt"
+  r=$(awk '/^rate:/{print $2}' "$rp")
+  [[ "$r" == "44100" ]] || fail "did not parse 44100 from hw_params_44100.txt"
+  r=$(awk '/^rate:/{print $2}' "$rb")
+  [[ "$r" == "48000" ]] || fail "did not parse 48000 from hw_params_48000.txt"
+  pass "procfs snapshot parsing OK"
+
+  if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
+    if out=$("$REPO_DIR/bin/alsa-probe" --simulate none 2>/dev/null); then
+      fail "simulate none should fail"
+    else
+      echo "$out" | grep -q '"error"' || fail "error JSON missing"
+      pass "simulate none returns error JSON"
+    fi
+  else
+    pass "alsa-probe not executable in this environment; skipping JSON error test"
+  fi
+}
+
+main "$@"

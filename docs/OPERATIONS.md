@@ -90,6 +90,14 @@ alsa:
   product_id: "0x2902"# optional (USB)
 ```
 
+## Clocking & Sample Rate
+- AirPlay is 44.1 kHz; shairport must open at 44100 Hz.
+- Good: raw `hw:<card>,<dev>` with `/proc/.../hw_params` rate: 44100.
+- If only 48k hardware exists (HDMI), we create a named `plug` PCM; shairport still opens at 44.1k (resampling hidden).
+- Avoid `default`/`dmix` unless explicitly configured and verified at 44.1k.
+- Good stats: `Output FPS (r) ≈ 44100.xx`; Bad: `≈ 47xxx` → you’re on a 48k path.
+- If preflight blocks start, re-run `bin/apply` to select a 44.1k sink or attach a USB DAC.
+
 ## Health & Troubleshooting
 - Quick view: `./bin/test-airplay2` (strict checks).
 - Detailed view: `./bin/test-airplay2 --logs --mdns --alsa`.
@@ -122,4 +130,11 @@ Note on NQPTP
   - `sudo sh -c 'echo AIRPLAY_WYSE_DEBUG=1 >> /etc/default/airplay_wyse'`
   - Re-render config: `sudo ./bin/apply`
   - Check: `journalctl -u shairport-sync -n 200 | rg -i "underrun|overrun|xruns|buffer|latency"`
-  - Use `./bin/debug-audio` to run a comprehensive diagnostic: build features, service status, identity, ALSA device open tests, Wi‑Fi powersave status, and a summary of likely causes with hints.
+  - Use `./bin/debug-audio` for a comprehensive diagnostic; it prints `Sink rate OK` when Output FPS is ~44100 and shows active hw_params when on `hw:`.
+
+Decision tree (≤10 lines):
+- Output FPS ~47k or preflight fails → you’re on 48k.
+- If USB DAC available → it will be auto-selected (`hw:` 44.1k) → OK.
+- If analog PCH supports 44.1k → use `hw:0,0` → OK.
+- If HDMI-only → we create a `plug` PCM; shairport opens at 44.1k → OK.
+- Still failing → stop other apps using ALSA; avoid `default`/`dmix`; attach a USB DAC.

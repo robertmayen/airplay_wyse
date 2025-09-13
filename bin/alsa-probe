@@ -1,17 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# alsa-probe: resolve an ALSA output device string hw:<card>,<device>
-# Preference: inventory overrides -> USB DACs -> first available playback
-# Exits non-zero if no playable device can be determined.
+# alsa-probe: enumerate ALSA playback PCMs and select a 44.1 kHz-capable
+# exclusive sink. Prefer raw hw:<card>,<dev>; reject default/dmix/plug chains.
+# Output JSON to stdout with fields: {card, dev, name, device, path}.
+# Exits non-zero if no 44.1 kHz-capable sink is found.
+#
+# Also supports:
+#   --validate hw:<c>,<d>   # check that PCM can open at 44100 and confirm via /proc hw_params
+#   --simulate none         # emit a deterministic JSON error (for tests)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 host_short() { hostname -s 2>/dev/null || hostname; }
 INV="$REPO_DIR/inventory/hosts/$(host_short).yml"
 
-# Minimal YAML reader for our needs
+json_escape() { local s="${1//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
+
+classify_pcm() {
+  # args: card dev -> prints class (usb|hdmi|analog)
+  local card="$1" dev="$2" cdir devdir
+  cdir="/sys/class/sound/card${card}"
+  if [[ -d "$cdir" ]]; then
+    devdir=$(readlink -f "$cdir/device" 2>/dev/null || true)
+    if [[ -n "$devdir" && -f "$devdir/idVendor" && -f "$devdir/idProduct" ]]; then
+      echo usb; return 0
+    fi
+  fi
+  case "$card,$dev" in
+    0,3|0,7|0,8) echo hdmi ;;
+    *) echo analog ;;
+  esac
+}
+
+out_json_ok() {
+  # args: card dev name
+  local card="$1" dev="$2" name="$3" esc cls
+  esc=$(json_escape "$name")
+  cls=$(classify_pcm "$card" "$dev")
+  printf '{"card":%s,"dev":%s,"name":"%s","rate_verified":44100,"path":"hw:%s,%s","class":"%s"}\n' \
+    "$card" "$dev" "$esc" "$card" "$dev" "$cls"
+}
+
+out_json_err() {
+  local msg="$1" hint="$2" em eh
+  em=$(json_escape "$msg"); eh=$(json_escape "$hint")
+  printf '{"error":"%s","hint":"%s"}\n' "$em" "$eh"
+}
+
+# Minimal YAML reader for optional hints
 yaml_get() {
   local key="$1" val=""
   [[ -f "$INV" ]] || { echo ""; return 0; }
@@ -20,110 +59,178 @@ yaml_get() {
     local subkey="${key#alsa.}"
     val=$(awk -v want="$subkey" '
       function strip(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-      function unq(s) {
-        gsub(/^\"|\"$/, "", s)   # remove surrounding "
-        q = sprintf("%c", 39)
-        gsub("^" q "|" q "$", "", s)  # remove surrounding single quotes
-        return s
-      }
+      function unq(s) { gsub(/^\"|\"$/, "", s); q=sprintf("%c",39); gsub("^" q "|" q "$", "", s); return s }
       BEGIN { IGNORECASE=1; insec=0; sec_indent=-1 }
-      {
-        line=$0
-        sub(/[ \t]*#.*/, "", line)
-        if (line ~ /^[ \t]*$/) next
-      }
+      { line=$0; sub(/[ \t]*#.*/, "", line); if (line ~ /^[ \t]*$/) next }
       match(line, /^([ \t]*)alsa:[ \t]*$/, m) { insec=1; sec_indent=length(m[1]); next }
       {
-        if (insec) {
-          match(line, /^([ \t]*)/, mi)
-          indent=length(mi[1])
-          if (indent <= sec_indent) { insec=0 }
-        }
+        if (insec) { match(line, /^([ \t]*)/, mi); indent=length(mi[1]); if (indent <= sec_indent) { insec=0 } }
       }
       insec && match(line, /^[ \t]*([A-Za-z0-9_]+)[ \t]*:[ \t]*(.*)$/, kv) {
-        k=kv[1]; v=strip(kv[2]); v=unq(v)
-        if (tolower(k) == tolower(want)) { print v; exit }
+        k=kv[1]; v=strip(kv[2]); v=unq(v); if (tolower(k) == tolower(want)) { print v; exit }
       }
     ' "$INV" ) || true
     if [[ -n "$val" ]]; then echo "$val"; return 0; fi
   fi
-
-  # Fallback: flat key on a single line
   val=$(grep -E "^${key}:[[:space:]]" "$INV" 2>/dev/null | sed -E "s/^${key}:[[:space:]]*//" | sed -E 's/[[:space:]]+#.*$//' | tr -d '"') || true
   echo "${val}"
 }
 
-# First playback device index for a given card number
-first_playback_dev() {
-  local c="$1" d
-  for d in /proc/asound/card"$c"/pcm*p; do
-    [[ -e "$d" ]] || continue
-    d=$(basename "$d")
-    echo "${d#pcm}" | tr -d 'p'
-    return 0
-  done
-  return 1
-}
-
 normalize_hex() { printf '%s\n' "$1" | tr 'A-F' 'a-f'; }
 
-# 1) Explicit override
-exp=$(yaml_get 'alsa.device' || true)
-if [[ -n "${exp:-}" ]]; then
-  echo "$exp"
-  exit 0
-fi
+aplay_ok() { command -v aplay >/dev/null 2>&1; }
 
-# 2) VID:PID preferred match
-vid=$(yaml_get 'alsa.vendor_id' || true)
-pid=$(yaml_get 'alsa.product_id' || true)
-devnum=$(yaml_get 'alsa.device_num' || true)
-devnum=${devnum:-0}
-vid_l=$(normalize_hex "${vid}")
-pid_l=$(normalize_hex "${pid}")
+carddev_names() {
+  # Emit: card dev | friendly name
+  aplay -l 2>/dev/null | awk '
+    /card [0-9]+:/ && /device [0-9]+:/ {
+      c=$3; sub(/:$/, "", c); d=$6; sub(/:$/, "", d);
+      match($0, /card [0-9]+: ([^,]+),/, m1)
+      match($0, /device [0-9]+: ([^\[]+)\[/, m2)
+      cn=(m1[1] != "" ? m1[1] : ("card" c))
+      dn=(m2[1] != "" ? m2[1] : ("device" d))
+      gsub(/^[ ]+|[ ]+$/, "", cn); gsub(/^[ ]+|[ ]+$/, "", dn)
+      print c, d "|" cn " - " dn
+    }'
+}
 
-if [[ -n "${vid_l:-}" && -n "${pid_l:-}" ]]; then
+open_and_confirm_44100() {
+  # args: card dev
+  local card="$1" dev="$2" basedir="/proc/asound/card${card}/pcm${dev}p"
+  aplay_ok || return 2
+  timeout 0.8 aplay -D "hw:${card},${dev}" -r 44100 -f S16_LE -c 2 -t raw /dev/zero -q >/dev/null 2>&1 || true
+  local tries=15 ok=1 sub
+  while (( tries-- > 0 )); do
+    for sub in "$basedir"/sub*/hw_params; do
+      [[ -f "$sub" ]] || continue
+      if grep -q "^rate: *44100$" "$sub" 2>/dev/null; then ok=0; break; fi
+    done
+    [[ $ok -eq 0 ]] && break
+    sleep 0.03
+  done
+  return $ok
+}
+
+select_candidate() {
+  # Output first matching candidate as JSON; precedence: inventory explicit -> VID:PID -> any USB hw -> any hw (non-USB) that confirms 44.1k
+  local exp vid pid devnum card dev name
+  exp=$(yaml_get 'alsa.device' || true)
+  if [[ -n "${exp:-}" ]]; then
+    case "$exp" in
+      hw:*,*) :;;
+      *) out_json_err "invalid explicit alsa.device (use hw:<card>,<dev>): $exp" "set alsa.device or remove override"; return 3 ;;
+    esac
+    card=$(echo "$exp" | awk -F'[:,]' '{print $2}'); dev=$(echo "$exp" | awk -F'[:,]' '{print $3}')
+    name=$(carddev_names | awk -v c="$card" -v d="$dev" -F'|' '$1~("^"c" "d"$") {print $2; exit}')
+    if open_and_confirm_44100 "$card" "$dev"; then out_json_ok "$card" "$dev" "${name:-card$card,dev$dev}"; return 0; else out_json_err "device $exp did not open at 44.1k" "choose a 44.1k-capable hw device"; return 2; fi
+  fi
+
+  vid=$(yaml_get 'alsa.vendor_id' || true)
+  pid=$(yaml_get 'alsa.product_id' || true)
+  devnum=$(yaml_get 'alsa.device_num' || true)
+  devnum=${devnum:-0}
+  local vid_l pid_l cdir devdir
+  vid_l=$(normalize_hex "${vid:-}"); pid_l=$(normalize_hex "${pid:-}")
+  if [[ -n "${vid_l:-}" && -n "${pid_l:-}" ]]; then
+    for cdir in /sys/class/sound/card*; do
+      [[ -d "$cdir" ]] || continue
+      devdir=$(readlink -f "$cdir/device" 2>/dev/null || true)
+      if [[ -n "$devdir" && -f "$devdir/idVendor" && -f "$devdir/idProduct" ]]; then
+        V=$(normalize_hex "0x$(cat "$devdir/idVendor" 2>/dev/null || echo)")
+        P=$(normalize_hex "0x$(cat "$devdir/idProduct" 2>/dev/null || echo)")
+        if [[ "$V" == "$vid_l" && "$P" == "$pid_l" ]]; then
+          card=$(basename "$cdir"); card=${card#card}
+          dev="$devnum"
+          name=$(carddev_names | awk -v c="$card" -v d="$dev" -F'|' '$1~("^"c" "d"$") {print $2; exit}')
+          if open_and_confirm_44100 "$card" "$dev"; then out_json_ok "$card" "$dev" "${name:-card$card,dev$dev}"; return 0; fi
+        fi
+      fi
+    done
+  fi
+
+  # 1) Prefer USB cards
   for cdir in /sys/class/sound/card*; do
     [[ -d "$cdir" ]] || continue
     devdir=$(readlink -f "$cdir/device" 2>/dev/null || true)
     if [[ -n "$devdir" && -f "$devdir/idVendor" && -f "$devdir/idProduct" ]]; then
-      V=$(normalize_hex "0x$(cat "$devdir/idVendor" 2>/dev/null || echo)")
-      P=$(normalize_hex "0x$(cat "$devdir/idProduct" 2>/dev/null || echo)")
-      if [[ "$V" == "$vid_l" && "$P" == "$pid_l" ]]; then
-        card=$(basename "$cdir"); card=${card#card}
-        if p=$(first_playback_dev "$card"); then
-          echo "hw:${card},${devnum:-$p}"
-          exit 0
-        fi
-      fi
+      card=$(basename "$cdir"); card=${card#card}
+      for p in /proc/asound/card"$card"/pcm*p; do
+        [[ -e "$p" ]] || continue
+        dev=$(basename "$p"); dev=${dev#pcm}; dev=${dev%p}
+        name=$(carddev_names | awk -v c="$card" -v d="$dev" -F'|' '$1~("^"c" "d"$") {print $2; exit}')
+        if open_and_confirm_44100 "$card" "$dev"; then out_json_ok "$card" "$dev" "${name:-card$card,dev$dev}"; return 0; fi
+      done
     fi
   done
-fi
 
-# 3) Any USB card -> prefer raw hw:
-for cdir in /sys/class/sound/card*; do
-  [[ -d "$cdir" ]] || continue
-  devdir=$(readlink -f "$cdir/device" 2>/dev/null || true)
-  if [[ -n "$devdir" && -f "$devdir/idVendor" && -f "$devdir/idProduct" ]]; then
-    card=$(basename "$cdir"); card=${card#card}
-    if p=$(first_playback_dev "$card"); then
-      echo "hw:${card},${devnum:-$p}"
-      exit 0
+  # 2) Any non-USB card that can do 44.1k on hw:
+  for cdir in /sys/class/sound/card*; do
+    [[ -d "$cdir" ]] || continue
+    devdir=$(readlink -f "$cdir/device" 2>/dev/null || true)
+    if [[ -z "$devdir" || ! ( -f "$devdir/idVendor" && -f "$devdir/idProduct" ) ]]; then
+      card=$(basename "$cdir"); card=${card#card}
+      for p in /proc/asound/card"$card"/pcm*p; do
+        [[ -e "$p" ]] || continue
+        dev=$(basename "$p"); dev=${dev#pcm}; dev=${dev%p}
+        name=$(carddev_names | awk -v c="$card" -v d="$dev" -F'|' '$1~("^"c" "d"$") {print $2; exit}')
+        if open_and_confirm_44100 "$card" "$dev"; then out_json_ok "$card" "$dev" "${name:-card$card,dev$dev}"; return 0; fi
+      done
     fi
-  fi
-done
+  done
+  return 4
+}
 
-# 4) Fallback: first playback on any non-USB card -> plughw:
-for cdir in /sys/class/sound/card*; do
-  [[ -d "$cdir" ]] || continue
-  devdir=$(readlink -f "$cdir/device" 2>/dev/null || true)
-  if [[ -z "$devdir" || ! ( -f "$devdir/idVendor" && -f "$devdir/idProduct" ) ]]; then
-    card=$(basename "$cdir"); card=${card#card}
-    if p=$(first_playback_dev "$card"); then
-      echo "plughw:${card},${devnum:-$p}"
-      exit 0
+validate_pcm() {
+  local devstr="$1"
+  case "$devstr" in
+    hw:*,*) :;;
+    *) echo "alsa-preflight: device must be hw:<card>,<dev> (got '$devstr')" >&2; return 2;;
+  esac
+  local card dev
+  card=$(echo "$devstr" | awk -F'[:,]' '{print $2}')
+  dev=$(echo "$devstr" | awk -F'[:,]' '{print $3}')
+  if open_and_confirm_44100 "$card" "$dev"; then
+    return 0
+  else
+    echo "device $devstr: could not confirm 44.1k (check HDMI/dmix/default path)" >&2
+    return 1
+  fi
+}
+
+main() {
+  if [[ "${1:-}" == "--simulate" && "${2:-}" == "none" ]]; then
+    out_json_err "no 44.1k-capable output available; likely routed via dmix/HDMI" "Attach a USB DAC or choose a raw hw: device" || true
+    return 11
+  fi
+  if [[ "${1:-}" == "--validate" && -n "${2:-}" ]]; then
+    validate_pcm "$2"
+    return $?
+  fi
+
+  if ! aplay_ok; then
+    out_json_err "aplay not found" "install alsa-utils"
+    return 12
+  fi
+
+  if select_candidate; then
+    return 0
+  else
+    # Build a minimal details list based on discovered hardware
+    details=()
+    if ls /proc/asound/card0/pcm3p 1>/dev/null 2>&1 || ls /proc/asound/card0/pcm7p 1>/dev/null 2>&1 || ls /proc/asound/card0/pcm8p 1>/dev/null 2>&1; then
+      details+=("only HDMI 48k present")
     fi
+    if aplay -L 2>/dev/null | grep -qi '\bdmix\b'; then details+=("dmix/default path locked at 48000") ; fi
+    # Emit error JSON per spec
+    printf '{"error":"no_44100_capable_sink","details":['
+    local first=1; for d in "${details[@]:-}"; do
+      [[ -z "$d" ]] && continue
+      if [[ $first -eq 1 ]]; then first=0; else printf ','; fi
+      printf '"%s"' "$(json_escape "$d")"
+    done
+    printf ']}\n'
+    return 10
   fi
-done
+}
 
-exit 1
+main "$@"
