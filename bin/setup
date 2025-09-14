@@ -19,6 +19,8 @@ IDENTITY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-identity.service"
 IDENTITY_UNIT_DEST="/etc/systemd/system/airplay-wyse-identity.service"
 POLICY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-alsa-policy.service"
 POLICY_UNIT_DEST="/etc/systemd/system/airplay-wyse-alsa-policy.service"
+KMODS_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-audio-kmods.service"
+KMODS_UNIT_DEST="/etc/systemd/system/airplay-wyse-audio-kmods.service"
 IDENTITY_LIBEXEC_DIR="/usr/local/libexec/airplay_wyse"
 IDENTITY_BIN_SRC="$REPO_DIR/bin/identity-ensure"
 IDENTITY_LIB_SRC="$REPO_DIR/bin/lib.sh"
@@ -155,6 +157,13 @@ install_policy_unit() {
   fi
 }
 
+install_kmods_unit() {
+  if [[ -f "$KMODS_UNIT_SRC" ]]; then
+    install -m 0644 "$KMODS_UNIT_SRC" "$KMODS_UNIT_DEST"
+    systemctl daemon-reload
+  fi
+}
+
 install_identity_program() {
   install -d -m 0755 "$IDENTITY_LIBEXEC_DIR"
   install -m 0755 "$IDENTITY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/identity-ensure"
@@ -235,6 +244,7 @@ main() {
   log "installing identity program + unit"
   install_identity_program
   install_identity_unit
+  install_kmods_unit
   install_policy_unit
 
   # Resolve defaults for device name (unique default). hardware_address/interface are managed by identity-ensure
@@ -261,6 +271,7 @@ main() {
 
   log "enabling and starting services"
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"
+  systemctl enable airplay-wyse-audio-kmods.service || true
   systemctl enable airplay-wyse-alsa-policy.service || true
   systemctl enable --now shairport-sync.service
 

@@ -12,6 +12,7 @@ Components
 - `bin/apply` (root): reapplies config when name/ALSA settings change and restarts shairport.
 - `bin/alsa-probe`: resolves a suitable `hw:<card>,<device>` string with USB preference.
 - `bin/alsa-policy-ensure` (root): probes DAC capabilities and generates `/etc/asound.conf` with a deterministic chain `plug -> softvol -> dmix -> hw`, anchored at either 44.1 kHz (AirPlay‑native) or 48 kHz (hardware‑native + soxr). Writes `/var/lib/airplay_wyse/alsa-policy.json` with the fingerprint and selected mode.
+- `airplay-wyse-audio-kmods.service`: best‑effort oneshot that loads common audio modules (`snd_usb_audio`, `snd_hda_intel`) early in boot. `shairport-sync` is ordered after this, identity, and the ALSA policy units.
 - Optional inventory hints in `inventory/hosts/<short-hostname>.yml` for ALSA.
  - Identity management in `bin/lib.sh`: derives a unique default name from MAC and self-heals cloned images by resetting AirPlay 2 identity on first-run/fingerprint change. A one-shot unit (`airplay-wyse-identity.service`) enforces this before `shairport-sync` starts.
 
@@ -20,6 +21,7 @@ Security
   - NoNewPrivileges, ProtectSystem=strict, PrivateTmp, MemoryDenyWriteExecute, AF restrictions.
   - Requires/After `nqptp.service` to ensure clocking is ready.
 - No on-device Git operations; no timers that write to `/etc`.
+- Systemd ordering for Shairport: `Requires=airplay-wyse-identity.service airplay-wyse-audio-kmods.service airplay-wyse-alsa-policy.service nqptp.service` and `After=` the same, ensuring identity, kernel modules, and the ALSA policy are in place with NQPTP clocking ready.
 
 Notes
 - If Shairport is built locally, setup writes a drop‑in to use `/usr/local/bin/shairport-sync`.

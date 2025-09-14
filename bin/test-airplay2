@@ -152,7 +152,7 @@ test_alsa_device() {
   log "✓ ALSA audio devices are present"
   # Anchor mode and policy checks
   if [[ -f /var/lib/airplay_wyse/alsa-policy.json ]]; then
-    local aj anchor soxr_required devname chain_ok
+    local aj anchor soxr_required devname chain_ok dmix_rate
     aj=/var/lib/airplay_wyse/alsa-policy.json
     anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
     soxr_required=$(awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
@@ -162,6 +162,22 @@ test_alsa_device() {
       else
         log "ALSA policy: anchor=48000 (+soxr)"
       fi
+    fi
+    # Validate ALSA chain and dmix rate in /etc/asound.conf
+    if [[ -f /etc/asound.conf ]]; then
+      local ok_plug ok_soft ok_dmix ok_hw
+      ok_plug=$(grep -qi 'pcm.!default' /etc/asound.conf && grep -qi 'type[[:space:]]\+plug' /etc/asound.conf && echo OK || echo NO)
+      ok_soft=$(grep -qi 'pcm._aw_softvol' /etc/asound.conf && echo OK || echo NO)
+      ok_dmix=$(grep -qi 'pcm._aw_dmix' /etc/asound.conf && echo OK || echo NO)
+      ok_hw=$(grep -qi 'pcm._aw_hw' /etc/asound.conf && echo OK || echo NO)
+      log "ALSA chain: plug=${ok_plug} softvol=${ok_soft} dmix=${ok_dmix} hw=${ok_hw}"
+      soft_or_fail "ALSA default chain is incomplete" bash -c "[[ '$ok_plug' = OK && '$ok_soft' = OK && '$ok_dmix' = OK && '$ok_hw' = OK ]]"
+      dmix_rate=$(awk '/pcm\._aw_dmix/{in=1} in && /rate[[:space:]]+[0-9]+/ {print $2; in=0; exit} in && /^}/ {in=0}' /etc/asound.conf 2>/dev/null | tr -dc '0-9')
+      if [[ -n "$anchor" && -n "$dmix_rate" ]]; then
+        soft_or_fail "dmix slave rate ($dmix_rate) does not match anchor ($anchor)" bash -c "[[ '$dmix_rate' = '$anchor' ]]"
+      fi
+    else
+      soft_or_fail "/etc/asound.conf is missing" false
     fi
   fi
 }

@@ -6,6 +6,7 @@ This document describes a simplified operational workflow for running a Wyse 507
 - Install once with `bin/setup` (root): installs packages, writes `/etc/shairport-sync.conf`, installs hardened shairport override, enables nqptp + shairport.
 - Apply config changes with `bin/apply` (root) when name or ALSA settings change.
 - Shairport runs as its vendor user with a hardened systemd override. NQPTP runs via its vendor unit.
+- Boot ordering ensures audio kernel modules, identity, and the ALSA policy are in place before Shairport starts.
 
 ## Prerequisites (Device)
 - Debian 13 preferred (APT provides `shairport-sync` with AirPlay 2 and `nqptp`).

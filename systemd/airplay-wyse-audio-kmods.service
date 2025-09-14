@@ -1,0 +1,16 @@
+[Unit]
+Description=AirPlay Wyse Audio Kernel Modules Ensure
+Documentation=https://github.com/robertmayen/airplay_wyse
+DefaultDependencies=no
+After=local-fs.target
+Before=airplay-wyse-alsa-policy.service
+
+[Service]
+Type=oneshot
+# Best-effort loading of common audio modules; ignore errors if built-in/absent.
+ExecStart=/bin/sh -c 'modprobe -q snd_usb_audio 2>/dev/null || true; modprobe -q snd_hda_intel 2>/dev/null || true'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+

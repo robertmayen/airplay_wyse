@@ -19,6 +19,9 @@ systemctl daemon-reload
 log "enable airplay-wyse-identity.service"
 systemctl enable airplay-wyse-identity.service || true
 
+log "enable airplay-wyse-audio-kmods.service"
+systemctl enable airplay-wyse-audio-kmods.service || true
+
 log "enable airplay-wyse-alsa-policy.service"
 systemctl enable airplay-wyse-alsa-policy.service || true
 
