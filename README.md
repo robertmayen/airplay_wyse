@@ -1,6 +1,7 @@
 # AirPlay Wyse
 
-Minimal AirPlay 2 receiver for Wyse 5070 with USB DAC — simplified, least‑privilege architecture.
+Minimal AirPlay 2–only receiver for Wyse 5070 on Debian 13 — simplified, least‑privilege architecture with adaptive resampling:
+prefer bit‑perfect 44.1 kHz; fall back to a single high‑quality SoXR resample when hardware is 48‑kHz‑only. PipeWire policy is set to follow common rates; Shairport uses ALSA for deterministic AP2 output.
 
 ## Overview
 
@@ -9,6 +10,7 @@ This repo configures a Wyse 5070 + USB DAC as an AirPlay 2 receiver using:
 - Shairport Sync with AirPlay 2 (APT if available; builds from source when required)
 - NQPTP for precise timing (APT if available; builds from source when required)
 - A tiny setup/apply workflow (no on-device GitOps, no periodic root jobs)
+- Adaptive resampling policy: PipeWire allowed‑rates configured for rate‑following; Shairport uses ALSA default anchored at 44.1 or 48 kHz (with libsoxr) to ensure only one resampler in the critical AP2 path.
 
 What changed: previous versions used a root‑run “reconcile/update/converge” model. This has been replaced with a simple one‑time setup and on-demand apply flow. Shairport runs as its vendor user with hardened systemd overrides; privileged actions happen only during setup/apply.
 

@@ -12,16 +12,18 @@ SHOW_MDNS=0
 SHOW_ALSA=0
 STRICT=1
 DRIFT_DUR=""
+SHOW_PW=0
 
 usage() {
   cat <<EOF
-Usage: ./bin/test-airplay2 [--logs] [--mdns] [--alsa] [--no-strict] [--drift <duration>]
+Usage: ./bin/test-airplay2 [--logs] [--mdns] [--alsa] [--pw] [--no-strict] [--drift <duration>]
 
 Default runs strict functionality checks (nqptp, shairport, mDNS, ALSA listing).
 
   --logs       Show recent shairport/nqptp logs and last-health.json if present
   --mdns       Show detailed avahi-browse output for _airplay._tcp and _raop._tcp
   --alsa       Show ALSA cards and attempt basic listing
+  --pw         Show PipeWire policy and current clock rate if present
   --no-strict  Do not exit non-zero on failures (report only)
   --drift D    Run a bounded drift sanity check while playing (e.g., 60s, 5m)
 EOF
@@ -34,6 +36,7 @@ parse_args() {
       --mdns) SHOW_MDNS=1 ;;
       --alsa) SHOW_ALSA=1 ;;
       --no-strict) STRICT=0 ;;
+      --pw) SHOW_PW=1 ;;
       --drift) shift; DRIFT_DUR="${1:-}" ;;
       -h|--help) usage; exit 0 ;;
       *) fail "unknown argument: $1" ;;
@@ -112,6 +115,26 @@ test_shairport_sync() {
   fi
   soft_or_fail "shairport-sync service is not active" systemctl is-active --quiet shairport-sync.service
   log "✓ shairport-sync is active (version: $(echo "$version_output" | head -1))"
+}
+
+test_ptp_ports() {
+  log "Checking NQPTP port ownership (UDP 319/320)..."
+  local ok319=0 ok320=0
+  if command -v ss >/dev/null 2>&1; then
+    ss -u -lnp 2>/dev/null | grep -E ':(319|320)\s' | grep -q nqptp && ok319=1 || ok319=0
+    ss -u -lnp 2>/dev/null | grep -E ':320\s' | grep -q nqptp && ok320=1 || ok320=0
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -i UDP:319 2>/dev/null | grep -q nqptp && ok319=1 || ok319=0
+    lsof -nP -i UDP:320 2>/dev/null | grep -q nqptp && ok320=1 || ok320=0
+  else
+    log "⚠ neither ss nor lsof present; skipping port ownership check"
+    return 0
+  fi
+  soft_or_fail "nqptp should own UDP 319" bash -c "[[ $ok319 -eq 1 ]]"
+  soft_or_fail "nqptp should own UDP 320" bash -c "[[ $ok320 -eq 1 ]]"
+  if [[ $ok319 -eq 1 && $ok320 -eq 1 ]]; then
+    log "✓ nqptp owns UDP 319/320"
+  fi
 }
 
 test_avahi_advertisement() {
@@ -264,7 +287,23 @@ main() {
     fi
   fi
   test_alsa_device
+  test_ptp_ports
   check_policy_and_soxr
+  if [[ $SHOW_PW -eq 1 ]]; then
+    echo "=== PipeWire Policy ==="
+    if [[ -f /etc/pipewire/pipewire.conf.d/90-airplay_wyse.conf ]]; then
+      echo "/etc/pipewire/pipewire.conf.d/90-airplay_wyse.conf:"; sed -n '1,120p' /etc/pipewire/pipewire.conf.d/90-airplay_wyse.conf 2>/dev/null || true
+    else
+      echo "No AirPlay Wyse PipeWire drop-in present"
+    fi
+    if command -v pw-dump >/dev/null 2>&1; then
+      local rate
+      rate=$(pw-dump 2>/dev/null | awk -F'[,: ]+' '/"clock\.rate"/{print $3; exit}' | tr -dc '0-9')
+      if [[ -n "$rate" ]]; then
+        log "PipeWire current clock.rate=${rate}"
+      fi
+    fi
+  fi
   [[ $SHOW_LOGS -eq 1 ]] && show_logs || true
   [[ $SHOW_MDNS -eq 1 ]] && show_mdns || true
   [[ $SHOW_ALSA -eq 1 ]] && show_alsa || true

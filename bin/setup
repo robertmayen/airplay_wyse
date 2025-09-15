@@ -19,6 +19,8 @@ IDENTITY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-identity.service"
 IDENTITY_UNIT_DEST="/etc/systemd/system/airplay-wyse-identity.service"
 POLICY_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-alsa-policy.service"
 POLICY_UNIT_DEST="/etc/systemd/system/airplay-wyse-alsa-policy.service"
+PW_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-pw-policy.service"
+PW_UNIT_DEST="/etc/systemd/system/airplay-wyse-pw-policy.service"
 KMODS_UNIT_SRC="$REPO_DIR/systemd/airplay-wyse-audio-kmods.service"
 KMODS_UNIT_DEST="/etc/systemd/system/airplay-wyse-audio-kmods.service"
 IDENTITY_LIBEXEC_DIR="/usr/local/libexec/airplay_wyse"
@@ -171,6 +173,9 @@ install_identity_program() {
   if [[ -f "$POLICY_BIN_SRC" ]]; then
     install -m 0755 "$POLICY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/alsa-policy-ensure"
   fi
+  if [[ -f "$REPO_DIR/bin/pw-policy-ensure" ]]; then
+    install -m 0755 "$REPO_DIR/bin/pw-policy-ensure" "$IDENTITY_LIBEXEC_DIR/pw-policy-ensure"
+  fi
   # Optional environment override file for interface selection, etc.
   if [[ ! -f "$DEFAULT_ENV_FILE" ]]; then
     cat >"$DEFAULT_ENV_FILE" <<'EOF'
@@ -247,6 +252,17 @@ main() {
   install_identity_unit
   install_kmods_unit
   install_policy_unit
+  if [[ -f "$REPO_DIR/bin/health-probe" ]]; then
+    install -m 0755 "$REPO_DIR/bin/health-probe" "$IDENTITY_LIBEXEC_DIR/health-probe"
+  fi
+  if [[ -f "$PW_UNIT_SRC" ]]; then
+    install -m 0644 "$PW_UNIT_SRC" "$PW_UNIT_DEST"
+    systemctl daemon-reload
+  fi
+  if [[ -f "$PW_UNIT_SRC" ]]; then
+    install -m 0644 "$PW_UNIT_SRC" "$PW_UNIT_DEST"
+    systemctl daemon-reload
+  fi
 
   # Resolve defaults for device name (unique default). hardware_address/interface are managed by identity-ensure
   local primary_if mac
@@ -274,6 +290,7 @@ main() {
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"
   systemctl enable airplay-wyse-audio-kmods.service || true
   systemctl enable airplay-wyse-alsa-policy.service || true
+  systemctl enable airplay-wyse-pw-policy.service || true
   systemctl enable --now shairport-sync.service
 
   log "done"

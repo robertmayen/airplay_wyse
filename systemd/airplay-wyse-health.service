@@ -1,0 +1,11 @@
+[Unit]
+Description=AirPlay Wyse Health Probe (read-only)
+Documentation=https://github.com/robertmayen/airplay_wyse
+After=network-online.target
+ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/health-probe
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/airplay_wyse/health-probe
+User=root
+

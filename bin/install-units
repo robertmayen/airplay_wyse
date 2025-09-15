@@ -25,6 +25,12 @@ systemctl enable airplay-wyse-audio-kmods.service || true
 log "enable airplay-wyse-alsa-policy.service"
 systemctl enable airplay-wyse-alsa-policy.service || true
 
+log "enable airplay-wyse-pw-policy.service"
+systemctl enable airplay-wyse-pw-policy.service || true
+
+log "install health timer (disabled by default)"
+# To enable later: sudo systemctl enable --now airplay-wyse-health.timer
+
 log "restart shairport-sync"
 systemctl restart shairport-sync.service || true
 

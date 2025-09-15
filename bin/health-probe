@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# health-probe: read-only health snapshot; does not modify files or restart services.
+# Logs a concise one-line summary and exits 0 regardless of findings (systemd timer friendly).
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+say() { echo "$(ts) [health] $*"; }
+
+summarize() {
+  local status="OK" details=()
+  systemctl is-active --quiet nqptp.service || { status="WARN"; details+=("nqptp=inactive"); }
+  systemctl is-active --quiet shairport-sync.service || { status="WARN"; details+=("shairport=inactive"); }
+  if command -v avahi-browse >/dev/null 2>&1; then
+    local a
+    a=$(timeout 6 avahi-browse -rt _airplay._tcp 2>/dev/null | grep -c "= ") || a=0
+    [[ "$a" -gt 0 ]] || details+=("mdns=no_airplay_txt")
+  fi
+  if [[ -f /var/lib/airplay_wyse/alsa-policy.json ]]; then
+    local anchor
+    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' /var/lib/airplay_wyse/alsa-policy.json | tr -dc '0-9')
+    if [[ -n "$anchor" ]]; then details+=("anchor=${anchor}"); fi
+  fi
+  if command -v shairport-sync >/dev/null 2>&1; then
+    shairport-sync -V 2>&1 | grep -q "AirPlay2" || { status="WARN"; details+=("ap2=missing"); }
+    shairport-sync -V 2>&1 | grep -q soxr && details+=("soxr=yes") || details+=("soxr=no")
+  fi
+  say "status=${status} $(printf '%s ' "${details[@]:-}")"
+}
+
+summarize
+

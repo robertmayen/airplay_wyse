@@ -38,6 +38,8 @@ log "Checking AirPlay 2 requirements..."
 check "Minimal shairport template present" "[ -f cfg/shairport-sync.minimal.conf.tmpl ]"
 check "NQPTP ordering present" "grep -q 'Requires=nqptp.service' systemd/overrides/shairport-sync.service.d/override.conf"
 check "NQPTP After present" "grep -q 'After=nqptp.service' systemd/overrides/shairport-sync.service.d/override.conf"
+check "Avahi required" "grep -q 'avahi-daemon.service' systemd/overrides/shairport-sync.service.d/override.conf"
+check "PartOf nqptp" "grep -q 'PartOf=nqptp.service' systemd/overrides/shairport-sync.service.d/override.conf"
 
 # 4) Idempotent apply
 log "Checking apply semantics..."
@@ -58,6 +60,9 @@ check "RestrictAddressFamilies in override" "grep -q 'RestrictAddressFamilies=' 
 # 7) ALSA device resolution present
 log "Checking ALSA probe..."
 check "ALSA probe script exists" "[ -f bin/alsa-probe ]"
+check "PW policy script exists" "[ -f bin/pw-policy-ensure ]"
+check "PW policy unit exists" "[ -f systemd/airplay-wyse-pw-policy.service ]"
+check "Health probe present" "[ -f bin/health-probe ]"
 
 # 8) Script executability (core)
 log "Checking script permissions..."

@@ -1,0 +1,15 @@
+[Unit]
+Description=AirPlay Wyse PipeWire Policy Ensure
+Documentation=https://github.com/robertmayen/airplay_wyse
+Wants=pipewire.service
+Before=shairport-sync.service
+ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/pw-policy-ensure
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/airplay_wyse/pw-policy-ensure
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+
