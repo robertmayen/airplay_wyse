@@ -68,14 +68,16 @@ main() {
     anchor=$(printf '%s' "$policy_json" | awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' | tr -dc '0-9')
     soxr_required=$(printf '%s' "$policy_json" | awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' | tr -dc '0-9')
     device="default"
-    output_rate="${anchor:-}"
+    # Only set output_rate when hardware-anchored to 48k
     if [[ "${soxr_required:-0}" -eq 1 ]]; then
+      output_rate="${anchor:-}"
       if shairport-sync -V 2>&1 | grep -q soxr; then
         interp="soxr"
       else
         die "hardware anchored at 48k but shairport-sync lacks libsoxr; rebuild with --with-soxr or install proper package"
       fi
     else
+      output_rate=""
       if shairport-sync -V 2>&1 | grep -q soxr; then interp="soxr"; else interp=""; fi
     fi
   else

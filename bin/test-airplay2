@@ -175,6 +175,15 @@ test_alsa_device() {
       dmix_rate=$(awk '/pcm\._aw_dmix/{in=1} in && /rate[[:space:]]+[0-9]+/ {print $2; in=0; exit} in && /^}/ {in=0}' /etc/asound.conf 2>/dev/null | tr -dc '0-9')
       if [[ -n "$anchor" && -n "$dmix_rate" ]]; then
         soft_or_fail "dmix slave rate ($dmix_rate) does not match anchor ($anchor)" bash -c "[[ '$dmix_rate' = '$anchor' ]]"
+        if [[ "$dmix_rate" = "44100" ]]; then
+          log "ALSA sink: OK (anchor=44100)"
+        else
+          if [[ "${soxr_required:-0}" -eq 1 ]]; then
+            log "ALSA sink: OK (anchor=48000 + soxr)"
+          else
+            log "ALSA sink: OK (anchor=${dmix_rate})"
+          fi
+        fi
       fi
     else
       soft_or_fail "/etc/asound.conf is missing" false

@@ -118,7 +118,7 @@ Note on NQPTP
 - AirPlay 2 requires `nqptp`. Setup installs it; if the package is unavailable, it is built from source automatically. The service override requires `nqptp` and orders shairport after it.
 
 ## Acceptance Checklist
-- `./bin/test-airplay2` completes without errors.
+- `./bin/test-airplay2` completes without errors (Makefile `test` target runs it strictly).
 - `shairport-sync -V` contains `AirPlay2`.
 - `systemctl is-active nqptp` returns `active`.
 - `_airplay._tcp` visible via `avahi-browse -rt _airplay._tcp` (or `_raop._tcp`).
@@ -134,7 +134,7 @@ Resampling & drift
   - `./bin/debug-audio` prints: `anchor=44100` or `anchor=48000 (+soxr)` and verifies the chain.
 
 Diagnostics
-- `./bin/test-airplay2 --alsa` prints the anchor and validates that Shairport points to `output_device = "default"`.
+- `./bin/test-airplay2 --alsa` prints the anchor, validates the plug/softvol/dmix/hw chain, checks that the dmix rate equals the anchor, and verifies that Shairport points to `output_device = "default"`.
 - Optional drift sanity check while playing: `./bin/test-airplay2 --drift 5m` monitors stuffing/sync/resync events and fails if they exceed a conservative threshold.
 - Debugging
 - To enable extra runtime statistics in Shairport logs and run extensive checks, set:
