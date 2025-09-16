@@ -155,6 +155,17 @@ parse_usb_formats() {
   done | tr ' ' '\n' | awk '!seen[$0]++ && $0!=""' | xargs echo || true
 }
 
+hda_codec_supports_rate() {
+  local card_num="$1" rate_regex="$2" f
+  for f in /proc/asound/card${card_num}/codec#*; do
+    [[ -f "$f" ]] || continue
+    if grep -Eqi "rates.*${rate_regex}" "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 aplay_opens() {
   local hw="$1" rate="$2" format="$3"
   # Try to open device for a very short time; avoid audio output if possible
@@ -193,9 +204,21 @@ decide_anchor_and_format() {
     anchor="$force"
   else
     if [[ -n "$rates" ]]; then
-      if [[ " $rates " == *" 44100 "* ]]; then anchor=44100; else anchor=48000; fi
+      if [[ " $rates " == *" 44100 "* ]]; then
+        anchor=44100
+      else
+        anchor=48000
+      fi
     else
-      if aplay_opens "$hw" 44100 "$fmt"; then anchor=44100; else anchor=48000; fi
+      if [[ "$usb" == "0" ]] && hda_codec_supports_rate "$card_num" "44\\.1k"; then
+        anchor=44100
+      elif aplay_opens "$hw" 44100 "$fmt"; then
+        anchor=44100
+      elif aplay_opens "$hw" 48000 "$fmt"; then
+        anchor=48000
+      else
+        anchor=44100
+      fi
     fi
   fi
 
