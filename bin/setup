@@ -201,47 +201,20 @@ main() {
   local hwaddr="${HW_ADDR:-}"
 
   # Ensure ALSA policy and default device chain exist; prefer ALSA default in Shairport
-  local policy_json anchor interp output_rate soxr_required
-  if [[ -x "$REPO_DIR/bin/alsa-policy-ensure" ]]; then
-    policy_json=$("$REPO_DIR/bin/alsa-policy-ensure")
-    anchor=$(printf '%s' "$policy_json" | awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' | tr -dc '0-9')
-    soxr_required=$(printf '%s' "$policy_json" | awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' | tr -dc '0-9')
-    # Default to using ALSA's default device which points to our anchored dmix
-    device="default"
-    # Only set output_rate when hardware-anchored to 48k
-    if [[ "${soxr_required:-0}" -eq 1 ]]; then
-      output_rate="${anchor:-}"
-      if shairport-sync -V 2>&1 | grep -q soxr; then
-        interp="soxr"
-      else
-        die "hardware anchored at 48k but shairport-sync lacks libsoxr; rebuild with --with-soxr or install proper package"
-      fi
-    else
-      # 44.1-anchored; interpolation optional; no output_rate
-      output_rate=""
-      if shairport-sync -V 2>&1 | grep -q soxr; then
-        interp="soxr"
-      else
-        interp=""
-      fi
-    fi
-  else
-    # Fallback to previous behavior
-    if [[ -n "${ALSA_DEVICE:-}" ]]; then
-      device="$ALSA_DEVICE"
-    elif [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
-      device="$($REPO_DIR/bin/alsa-probe || true)"; device="${device:-hw:0,0}"
-    else
-      device="hw:0,0"
-    fi
-    output_rate=""; interp=""
-  fi
-
-  log "ensuring AirPlay 2 stack (shairport-sync + nqptp)"
+  log "ensuring supporting packages"
   ensure_pkg jq || true
   ensure_pkg alsa-utils || true
+
+  log "ensuring AirPlay 2 stack (shairport-sync + nqptp)"
   ensure_nqptp
   ensure_shairport_ap2
+
+  log "configuring ALSA policy"
+  local audio_result
+  if ! audio_result=$(resolve_audio_settings "$REPO_DIR" "${ALSA_DEVICE:-}"); then
+    die "${AUDIO_SETTINGS_ERROR:-failed to resolve audio policy}"
+  fi
+  IFS='|' read -r device output_rate interp <<<"$audio_result"
 
   log "installing shairport-sync override (hardened + nqptp ordering)"
   install_override
@@ -254,10 +227,6 @@ main() {
   install_policy_unit
   if [[ -f "$REPO_DIR/bin/health-probe" ]]; then
     install -m 0755 "$REPO_DIR/bin/health-probe" "$IDENTITY_LIBEXEC_DIR/health-probe"
-  fi
-  if [[ -f "$PW_UNIT_SRC" ]]; then
-    install -m 0644 "$PW_UNIT_SRC" "$PW_UNIT_DEST"
-    systemctl daemon-reload
   fi
   if [[ -f "$PW_UNIT_SRC" ]]; then
     install -m 0644 "$PW_UNIT_SRC" "$PW_UNIT_DEST"

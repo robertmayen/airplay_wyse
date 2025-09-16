@@ -10,6 +10,81 @@ ts() {
 
 STATE_DIR="/var/lib/airplay_wyse"
 IDENTITY_FILE="$STATE_DIR/instance.json"
+AUDIO_SETTINGS_ERROR=""
+
+json_field() {
+  # Extract a single JSON field from a compact object string.
+  # Prefers jq when available; falls back to a light awk parser.
+  local json="$1" key="$2"
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -r --arg key "$key" '.[$key] // empty'
+  else
+    printf '%s' "$json" |
+      awk -v key="$key" '
+        BEGIN { FS="[:,{}]" }
+        {
+          for (i = 1; i <= NF; i++) {
+            gsub(/^[ \t\r\n\"]+|[ \t\r\n\"]+$/, "", $i)
+            if ($i == key) {
+              val=$(i+1)
+              gsub(/^[ \t\r\n\"]+|[ \t\r\n\"]+$/, "", val)
+              print val
+              exit
+            }
+          }
+        }
+      '
+  fi
+}
+
+shairport_has_soxr() {
+  if command -v shairport-sync >/dev/null 2>&1; then
+    shairport-sync -V 2>&1 | grep -q 'soxr'
+  else
+    return 1
+  fi
+}
+
+resolve_audio_settings() {
+  # Decide ALSA device/output/interpolation based on alsa-policy-ensure output when present.
+  # Args: <repo_dir> [manual_device]
+  local repo_dir="$1" manual_device="${2:-}"
+  local device output_rate interp policy_json anchor soxr_required
+  AUDIO_SETTINGS_ERROR=""
+
+  if [[ -x "$repo_dir/bin/alsa-policy-ensure" ]]; then
+    policy_json=$("$repo_dir/bin/alsa-policy-ensure")
+    anchor=$(json_field "$policy_json" "anchor_hz" | tr -dc '0-9')
+    soxr_required=$(json_field "$policy_json" "soxr_required" | tr -dc '0-9')
+    device="default"
+    if [[ "${soxr_required:-0}" -eq 1 ]]; then
+      output_rate="${anchor:-}"
+      if shairport_has_soxr; then
+        interp="soxr"
+      else
+        AUDIO_SETTINGS_ERROR="hardware anchored at ${anchor:-48000} Hz but shairport-sync lacks libsoxr; rebuild with --with-soxr or install the AirPlay 2 package"
+        return 1
+      fi
+    else
+      output_rate=""
+      if shairport_has_soxr; then interp="soxr"; else interp=""; fi
+    fi
+  else
+    device="$manual_device"
+    if [[ -z "$device" ]]; then
+      if [[ -x "$repo_dir/bin/alsa-probe" ]]; then
+        device="$($repo_dir/bin/alsa-probe || true)"
+        device="${device:-hw:0,0}"
+      else
+        device="hw:0,0"
+      fi
+    fi
+    output_rate=""
+    interp=""
+  fi
+
+  printf '%s|%s|%s\n' "$device" "${output_rate:-}" "${interp:-}"
+}
 
 render_shairport_conf() {
   # Args: <template> <target> <name> <device> <mixer> <iface> <hwaddr> [output_rate] [statistics] [interpolation]
