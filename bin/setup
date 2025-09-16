@@ -228,6 +228,9 @@ main() {
   if [[ -f "$REPO_DIR/bin/health-probe" ]]; then
     install -m 0755 "$REPO_DIR/bin/health-probe" "$IDENTITY_LIBEXEC_DIR/health-probe"
   fi
+  if [[ -f "$REPO_DIR/bin/check-airplay-device-id" ]]; then
+    install -m 0755 "$REPO_DIR/bin/check-airplay-device-id" "$IDENTITY_LIBEXEC_DIR/check-airplay-device-id"
+  fi
   if [[ -f "$PW_UNIT_SRC" ]]; then
     install -m 0644 "$PW_UNIT_SRC" "$PW_UNIT_DEST"
     systemctl daemon-reload

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+conf="${1:-/etc/shairport-sync.conf}"
+if [[ ! -f "$conf" ]]; then
+  echo "[airplay-guard] config missing: $conf" >&2
+  exit 1
+fi
+val=$(awk 'BEGIN{IGNORECASE=1}
+  /airplay_device_id[[:space:]]*=/{
+    match($0,/=[[:space:]]*[^;]+;/)
+    if (RSTART>0) {
+      v=substr($0,RSTART+1,RLENGTH-2)
+      gsub(/^[ \t]+|[ \t]+$/, "", v)
+      print v
+      exit
+    }
+  }' "$conf" 2>/dev/null || true)
+up=$(printf '%s' "$val" | tr '[:lower:]' '[:upper:]' | tr -d ' ')
+case "$up" in
+  ""|"0"|"0X0"|"0X0L"|"0X000000000000"|"0X000000000000L")
+    echo "[airplay-guard] airplay_device_id missing or zero in $conf; run identity-ensure" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+ esac
