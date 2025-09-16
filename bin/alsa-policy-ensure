@@ -43,10 +43,18 @@ amixer_try_set() {
   local card="$1" control="$2"
   shift 2
   amixer_present || return 1
-  local value
+  local value attempt
   for value in "$@"; do
-    if amixer -c "$card" sset "$control" "$value" >/dev/null 2>&1; then
-      return 0
+    [[ -n "$value" ]] || continue
+    for attempt in "$value" "${value},${value}"; do
+      if amixer -c "$card" sset "$control" "$attempt" >/dev/null 2>&1; then
+        return 0
+      fi
+    done
+    if [[ "$value" != *' '* && "$value" != *','* ]]; then
+      if amixer -c "$card" sset "$control" "$value" "$value" >/dev/null 2>&1; then
+        return 0
+      fi
     fi
   done
   return 1
@@ -57,9 +65,10 @@ configure_analog_controls() {
   [[ "$usb_flag" == "1" ]] && return 0
   amixer_present || return 0
   local touched=0
-  if amixer_try_set "$card" "Auto-Mute Mode" Enabled; then touched=1; fi
+  if amixer_try_set "$card" "Auto-Mute Mode" "Line Out+Speaker" "Speaker Only"; then touched=1; fi
   if amixer_try_set "$card" "Headphone Playback Switch" on unmute; then touched=1; fi
   if amixer_try_set "$card" "Headphone Playback Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "Headphone+LO Playback Volume" 90% unmute; then touched=1; fi
   if amixer_try_set "$card" "Headphone Switch" on unmute; then touched=1; fi
   if amixer_try_set "$card" "Headphone Volume" 90% unmute; then touched=1; fi
   if amixer_try_set "$card" "Line Out Playback Switch" on unmute; then touched=1; fi
