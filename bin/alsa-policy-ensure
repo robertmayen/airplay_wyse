@@ -43,16 +43,23 @@ amixer_try_set() {
   local card="$1" control="$2"
   shift 2
   amixer_present || return 1
-  local value attempt
+  local value attempt ctl
+  ctl="name='$control'"
   for value in "$@"; do
     [[ -n "$value" ]] || continue
     for attempt in "$value" "${value},${value}"; do
-      if amixer -c "$card" sset "$control" "$attempt" >/dev/null 2>&1; then
+      if amixer -c "$card" -- sset "$control" "$attempt" >/dev/null 2>&1; then
+        return 0
+      fi
+      if amixer -c "$card" -- cset "$ctl" "$attempt" >/dev/null 2>&1; then
         return 0
       fi
     done
     if [[ "$value" != *' '* && "$value" != *','* ]]; then
-      if amixer -c "$card" sset "$control" "$value" "$value" >/dev/null 2>&1; then
+      if amixer -c "$card" -- sset "$control" "$value" "$value" >/dev/null 2>&1; then
+        return 0
+      fi
+      if amixer -c "$card" -- cset "$ctl" "$value" "$value" >/dev/null 2>&1; then
         return 0
       fi
     fi
