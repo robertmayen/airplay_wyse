@@ -27,6 +27,7 @@ IDENTITY_LIBEXEC_DIR="/usr/local/libexec/airplay_wyse"
 IDENTITY_BIN_SRC="$REPO_DIR/bin/identity-ensure"
 IDENTITY_LIB_SRC="$REPO_DIR/bin/lib.sh"
 POLICY_BIN_SRC="$REPO_DIR/bin/alsa-policy-ensure"
+PROBE_BIN_SRC="$REPO_DIR/bin/alsa-probe"
 DEFAULT_ENV_FILE="/etc/default/airplay_wyse"
 LIB_SH="$REPO_DIR/bin/lib.sh"
 DEFAULTS_FILE=${DEFAULTS_FILE:-/etc/default/airplay_wyse}
@@ -172,6 +173,9 @@ install_identity_program() {
   install -m 0644 "$IDENTITY_LIB_SRC" "$IDENTITY_LIBEXEC_DIR/lib.sh"
   if [[ -f "$POLICY_BIN_SRC" ]]; then
     install -m 0755 "$POLICY_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/alsa-policy-ensure"
+  fi
+  if [[ -f "$PROBE_BIN_SRC" ]]; then
+    install -m 0755 "$PROBE_BIN_SRC" "$IDENTITY_LIBEXEC_DIR/alsa-probe"
   fi
   if [[ -f "$REPO_DIR/bin/pw-policy-ensure" ]]; then
     install -m 0755 "$REPO_DIR/bin/pw-policy-ensure" "$IDENTITY_LIBEXEC_DIR/pw-policy-ensure"

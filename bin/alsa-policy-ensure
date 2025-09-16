@@ -41,15 +41,16 @@ probe_hw_from_repo() {
   if [[ -n "${ALSA_HW:-}" ]]; then
     echo "$ALSA_HW"; return 0
   fi
-  if [[ -x "$REPO_DIR/bin/alsa-probe" ]]; then
-    local d
-    d="$($REPO_DIR/bin/alsa-probe 2>/dev/null || true)"
-    # Ensure we return a raw hw device (not plughw) for capability probing
-    d="${d/plughw:/hw:}"
-    if [[ "$d" =~ ^hw:[0-9]+,[0-9]+$ ]]; then
-      echo "$d"; return 0
+  local candidate d
+  for candidate in "$SCRIPT_DIR/alsa-probe" "$REPO_DIR/bin/alsa-probe"; do
+    if [[ -x "$candidate" ]]; then
+      d="$($candidate 2>/dev/null || true)"
+      d="${d/plughw:/hw:}"
+      if [[ "$d" =~ ^hw:[0-9]+,[0-9]+$ ]]; then
+        echo "$d"; return 0
+      fi
     fi
-  fi
+  done
   # Fallback to hw:0,0
   echo "hw:0,0"
 }
