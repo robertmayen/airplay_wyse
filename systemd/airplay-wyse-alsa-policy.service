@@ -4,11 +4,11 @@ Documentation=https://github.com/robertmayen/airplay_wyse
 Wants=network-online.target
 After=network-online.target airplay-wyse-audio-kmods.service
 Before=shairport-sync.service
-ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/alsa-policy-ensure
+ConditionPathExists=/usr/local/libexec/airplay_wyse/alsa-policy-ensure
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/airplay_wyse/alsa-policy-ensure
+ExecStart=/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/local/libexec/airplay_wyse/alsa-policy-ensure
 RemainAfterExit=yes
 
 [Install]

@@ -4,11 +4,11 @@ Documentation=https://github.com/robertmayen/airplay_wyse
 Wants=network-online.target
 After=network-online.target
 Before=shairport-sync.service
-ConditionPathIsExecutable=/usr/local/libexec/airplay_wyse/identity-ensure
+ConditionPathExists=/usr/local/libexec/airplay_wyse/identity-ensure
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/airplay_wyse/identity-ensure
+ExecStart=/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/local/libexec/airplay_wyse/identity-ensure
 RemainAfterExit=yes
 
 [Install]
