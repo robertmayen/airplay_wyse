@@ -52,8 +52,18 @@ resolve_audio_settings() {
   local device output_rate interp policy_json anchor soxr_required
   AUDIO_SETTINGS_ERROR=""
 
-  if [[ -x "$repo_dir/bin/alsa-policy-ensure" ]]; then
-    policy_json=$("$repo_dir/bin/alsa-policy-ensure")
+  local helper=""
+  if [[ -x "/usr/local/libexec/airplay_wyse/alsa-policy-ensure" ]]; then
+    helper="/usr/local/libexec/airplay_wyse/alsa-policy-ensure"
+  elif [[ -x "$repo_dir/bin/alsa-policy-ensure" ]]; then
+    helper="$repo_dir/bin/alsa-policy-ensure"
+  fi
+
+  if [[ -n "$helper" ]]; then
+    if ! policy_json=$("$helper"); then
+      AUDIO_SETTINGS_ERROR="alsa-policy-ensure failed to resolve audio policy"
+      return 1
+    fi
     anchor=$(json_field "$policy_json" "anchor_hz" | tr -dc '0-9')
     soxr_required=$(json_field "$policy_json" "soxr_required" | tr -dc '0-9')
     device="default"
