@@ -235,20 +235,20 @@ main() {
 
   local hw card_num dev_num card_id usb=0 vid pid anchor fmt soxr_req rates formats
   hw=$(probe_hw_from_repo)
-  read -r card_num dev_num < <(card_dev_from_hw "$hw")
+  read -r card_num dev_num < <(card_dev_from_hw "$hw") || true
   [[ -n "$card_num" && -n "$dev_num" ]] || die "could not parse card/device from '$hw'"
   card_id=$(card_id_from_num "$card_num")
   [[ -n "$card_id" ]] || die "could not resolve card id for card $card_num"
 
   if is_usb_card "$card_num"; then
     usb=1
-    read -r vid pid < <(usb_vidpid "$card_num" || true)
+    read -r vid pid < <(usb_vidpid "$card_num" || true) || true
   else
     usb=0
     vid=""; pid=""
   fi
 
-  read -r anchor fmt soxr_req < <(decide_anchor_and_format "$hw" "$card_num" "$dev_num" "$usb")
+  read -r anchor fmt soxr_req < <(decide_anchor_and_format "$hw" "$card_num" "$dev_num" "$usb") || true
   [[ -n "$anchor" && -n "$fmt" ]] || die "could not decide anchor/format"
 
   # Build new JSON and compare
@@ -281,4 +281,3 @@ main() {
 }
 
 main "$@"
-
