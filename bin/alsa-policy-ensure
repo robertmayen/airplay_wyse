@@ -37,6 +37,46 @@ json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
 ensure_state_dir() { install -d -m 0755 "$STATE_DIR"; }
 
+amixer_present() { command -v amixer >/dev/null 2>&1; }
+
+amixer_try_set() {
+  local card="$1" control="$2"
+  shift 2
+  amixer_present || return 1
+  local value
+  for value in "$@"; do
+    if amixer -c "$card" sset "$control" "$value" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+configure_analog_controls() {
+  local card="$1" usb_flag="$2"
+  [[ "$usb_flag" == "1" ]] && return 0
+  amixer_present || return 0
+  local touched=0
+  if amixer_try_set "$card" "Auto-Mute Mode" Enabled; then touched=1; fi
+  if amixer_try_set "$card" "Headphone Playback Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "Headphone Playback Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "Headphone Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "Headphone Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "Line Out Playback Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "Line Out Playback Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "Line Out Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "Line Out Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "Speaker Playback Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "Speaker Playback Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "Master Playback Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "Master Playback Volume" 90% unmute; then touched=1; fi
+  if amixer_try_set "$card" "PCM Playback Switch" on unmute; then touched=1; fi
+  if amixer_try_set "$card" "PCM Playback Volume" 90% unmute; then touched=1; fi
+  if [[ $touched -eq 1 ]]; then
+    log "configured analog playback controls on card $card"
+  fi
+}
+
 probe_hw_from_repo() {
   if [[ -n "${ALSA_HW:-}" ]]; then
     echo "$ALSA_HW"; return 0
@@ -273,6 +313,8 @@ main() {
     install -m 0644 "$tmpjson" "$FPR_JSON"
   fi
   rm -f "$tmpjson"
+
+  configure_analog_controls "$card_num" "$usb"
 
   # Print concise JSON to stdout
   printf '{"anchor_hz":%s,"mode":"%s","hw":"%s","card_id":"%s","card_num":%s,"device_num":%s,"format":"%s","usb":%s,"soxr_required":%s}\n' \
