@@ -208,6 +208,7 @@ main() {
   log "ensuring supporting packages"
   ensure_pkg jq || true
   ensure_pkg alsa-utils || true
+  ensure_pkg avahi-daemon || true
 
   log "ensuring AirPlay 2 stack (shairport-sync + nqptp)"
   ensure_nqptp
@@ -263,6 +264,7 @@ main() {
   fi
 
   log "enabling and starting services"
+  systemctl enable --now avahi-daemon.service || log "avahi-daemon not present; skipping enable"
   systemctl enable --now nqptp.service || log "nqptp not present; skipping enable"
   systemctl enable airplay-wyse-audio-kmods.service || true
   systemctl enable airplay-wyse-alsa-policy.service || true
