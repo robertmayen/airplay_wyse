@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 from pathlib import Path
 from typing import Iterable
@@ -54,12 +55,18 @@ exec python3 -m airplay_wyse.cli "$@"
 def _write_wrappers() -> None:
     for name, command in WRAPPER_COMMANDS.items():
         path = LIBEXEC_ROOT / name
-        args = " ".join(command)
-        content = f"""#!/usr/bin/env bash
-set -euo pipefail
-BASE="$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)"
-exec "$BASE/aw" {args} "$@"
-"""
+        args = " ".join(shlex.quote(part) for part in command)
+        if args:
+            exec_line = f'exec "$BASE/aw" {args} "$@"'
+        else:
+            exec_line = 'exec "$BASE/aw" "$@"'
+        lines = [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            'BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+            exec_line,
+        ]
+        content = "\n".join(lines) + "\n"
         path.write_text(content, encoding="utf-8")
         os.chmod(path, 0o755)
 
