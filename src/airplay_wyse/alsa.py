@@ -43,6 +43,10 @@ _DEVICE_RE = re.compile(r"card\s+(\d+):\s+([^\s,]+).*device\s+(\d+):")
 _RATE_RE = re.compile(r"Rates:\s*([^\n]+)")
 _INT_RE = re.compile(r"(\d{4,6})")
 
+_ANALOG_HINTS = ("analog", "headphone", "headphones", "headset", "line out", "lineout", "speaker", "speakers", "dac")
+_HDMI_HINTS = ("hdmi", "displayport", "dp")
+_DIGITAL_HINTS = ("iec958", "spdif", "s/pdif", "digital")
+
 
 def _list_playback_devices() -> list[dict[str, Any]]:
     try:
@@ -58,13 +62,42 @@ def _list_playback_devices() -> list[dict[str, Any]]:
             card = int(match.group(1))
             card_id = match.group(2)
             dev = int(match.group(3))
-            devices.append({"card": card, "card_id": card_id, "dev": dev})
+            description = ""
+            device_idx = line.lower().find("device")
+            if device_idx != -1:
+                after = line[device_idx:]
+                colon = after.find(":")
+                if colon != -1:
+                    description = after[colon + 1 :].strip()
+            if description:
+                # Drop bracketed aliases and extra whitespace
+                description = description.split("[")[0].strip()
+            devices.append(
+                {
+                    "card": card,
+                    "card_id": card_id,
+                    "dev": dev,
+                    "description": description,
+                }
+            )
     return devices
 
 
 def _is_usb_card(card: int) -> bool:
     path = Path(f"/sys/class/sound/card{card}/device")
     return (path / "idVendor").exists() and (path / "idProduct").exists()
+
+
+def _device_category(description: str, card_id: str) -> int:
+    desc = description.lower()
+    cid = card_id.lower()
+    if any(hint in desc or hint in cid for hint in _ANALOG_HINTS):
+        return 0
+    if any(hint in desc or hint in cid for hint in _HDMI_HINTS):
+        return 2
+    if any(hint in desc or hint in cid for hint in _DIGITAL_HINTS):
+        return 3
+    return 1
 
 
 def _read_rates(card: int) -> set[int]:
@@ -102,13 +135,27 @@ def _choose_device(manual_device: str | None = None) -> tuple[str, int | None, i
     if not devices:
         return "hw:0,0", None, None, None, None
 
-    # Prefer USB devices first
-    usb_devices = [d for d in devices if _is_usb_card(d["card"])]
-    preferred = usb_devices[0] if usb_devices else devices[0]
+    annotated: list[dict[str, Any]] = []
+    for dev in devices:
+        card = dev["card"]
+        annotated.append(
+            {
+                **dev,
+                "is_usb": _is_usb_card(card),
+            }
+        )
+
+    def sort_key(entry: dict[str, Any]) -> tuple[int, int, int, int]:
+        is_usb = 0 if entry.get("is_usb") else 1
+        category = _device_category(entry.get("description", ""), entry.get("card_id") or "")
+        return (is_usb, category, entry["card"], entry["dev"])
+
+    annotated.sort(key=sort_key)
+    preferred = annotated[0]
     card = preferred["card"]
     dev = preferred["dev"]
     card_id = preferred.get("card_id")
-    return f"hw:{card},{dev}", card, dev, card_id, _is_usb_card(card)
+    return f"hw:{card},{dev}", card, dev, card_id, bool(preferred.get("is_usb"))
 
 
 def _read_card_id(card: int) -> str | None:
