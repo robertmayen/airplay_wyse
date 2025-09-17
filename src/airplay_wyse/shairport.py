@@ -14,12 +14,12 @@ class StackStatus:
     has_soxr: bool
 
 
-SHairport_PKG = "shairport-sync"
+SHAIRPORT_PKG = "shairport-sync"
 NQPTP_PKG = "nqptp"
 
 
 def ensure_stack() -> StackStatus:
-    packages.ensure_packages([SHAirport_PKG, NQPTP_PKG])
+    packages.ensure_packages([SHAIRPORT_PKG, NQPTP_PKG])
     has_airplay2 = False
     has_soxr = False
     try:
