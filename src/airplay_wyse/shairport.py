@@ -1,7 +1,10 @@
 """Shairport/NQPTP helpers."""
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import packages, utils
 
@@ -16,10 +19,24 @@ class StackStatus:
 
 SHAIRPORT_PKG = "shairport-sync"
 NQPTP_PKG = "nqptp"
+NQPTP_REPO = "https://github.com/mikebrady/nqptp.git"
+
+NQPTP_BUILD_DEPS = (
+    "build-essential",
+    "git",
+    "autoconf",
+    "automake",
+    "libtool",
+    "pkg-config",
+)
 
 
 def ensure_stack() -> StackStatus:
-    packages.ensure_packages([SHAIRPORT_PKG, NQPTP_PKG])
+    packages.ensure_package(SHAIRPORT_PKG)
+    try:
+        packages.ensure_package(NQPTP_PKG)
+    except utils.CommandError:
+        _build_nqptp_from_source()
     has_airplay2 = False
     has_soxr = False
     try:
@@ -37,3 +54,17 @@ def ensure_stack() -> StackStatus:
         has_airplay2=has_airplay2,
         has_soxr=has_soxr,
     )
+
+
+def _build_nqptp_from_source() -> None:
+    packages.ensure_packages(NQPTP_BUILD_DEPS)
+    with tempfile.TemporaryDirectory(prefix="aw-nqptp-") as tmpdir:
+        workdir = Path(tmpdir)
+        repo_dir = workdir / "nqptp"
+        utils.run_cmd(["git", "clone", NQPTP_REPO, str(repo_dir)])
+        utils.run_cmd(["autoreconf", "-fi"], cwd=repo_dir)
+        utils.run_cmd(["./configure", "--with-systemd-startup"], cwd=repo_dir)
+        jobs = str(max(os.cpu_count() or 1, 1))
+        utils.run_cmd(["make", f"-j{jobs}"], cwd=repo_dir)
+        utils.run_cmd(["make", "install"], cwd=repo_dir)
+    utils.run_cmd(["systemctl", "daemon-reload"], check=False)
