@@ -292,9 +292,11 @@ say "Config excerpts:"
       echo "(no AirPlay Wyse drop-in present)"
     fi
     if command -v pw-dump >/dev/null 2>&1; then
-      local pw_rate
-      pw_rate=$(pw-dump 2>/dev/null | awk -F'[,: ]+' '/"clock\.rate"/{print $3; exit}' | tr -dc '0-9')
-      if [[ -n "$pw_rate" ]]; then echo "PipeWire clock.rate=${pw_rate}"; fi
+      local pw_out pw_rate
+      if pw_out=$(pw-dump 2>/dev/null); then
+        pw_rate=$(printf '%s\n' "$pw_out" | awk -F'[,: ]+' '/"clock\.rate"/{print $3; exit}' | tr -dc '0-9')
+        if [[ -n "$pw_rate" ]]; then echo "PipeWire clock.rate=${pw_rate}"; fi
+      fi
     fi
   fi
 

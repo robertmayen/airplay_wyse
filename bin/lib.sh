@@ -60,8 +60,14 @@ resolve_audio_settings() {
   fi
 
   if [[ -n "$helper" ]]; then
-    if ! policy_json=$("$helper"); then
+    local helper_output
+    if ! helper_output=$("$helper" 2>&1); then
       AUDIO_SETTINGS_ERROR="alsa-policy-ensure failed to resolve audio policy"
+      return 1
+    fi
+    policy_json=$(printf '%s\n' "$helper_output" | awk 'BEGIN{json=""} /^[ \t]*\{/{ json=$0 } END{print json}')
+    if [[ -z "$policy_json" ]]; then
+      AUDIO_SETTINGS_ERROR="unexpected output from alsa-policy-ensure"
       return 1
     fi
     anchor=$(json_field "$policy_json" "anchor_hz" | tr -dc '0-9')
