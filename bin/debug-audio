@@ -302,40 +302,58 @@ say "Config excerpts:"
 
   # ALSA policy anchor and chain
   say "ALSA anchor & chain:"
-  if [[ -f /var/lib/airplay_wyse/alsa-policy.json ]]; then
-    local aj anchor mode fmt devnum cardid soxr_required
-    aj=/var/lib/airplay_wyse/alsa-policy.json
-    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
-    fmt=$(awk -F'"' '/"format"/{print $4; exit}' "$aj")
-    devnum=$(awk -F'[,:}]' '/"device_num"/{for(i=1;i<=NF;i++) if ($i ~ /"device_num"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
-    cardid=$(awk -F'"' '/"card_id"/{print $4; exit}' "$aj")
-    soxr_required=$(awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
-    if [[ -n "$anchor" ]]; then
-      if [[ "$anchor" == "44100" ]]; then echo "anchor=44100 (AirPlay-native), fmt=${fmt:-?}, card=${cardid:-?},dev=${devnum:-?}"; else echo "anchor=48000 (+soxr), fmt=${fmt:-?}, card=${cardid:-?},dev=${devnum:-?}"; fi
+  local policy_json="" anchor="" cardid="" devnum="" soxr_required=0
+  for candidate in /var/lib/airplay_wyse/config.json /var/lib/airplay_wyse/alsa-policy.json; do
+    if [[ -f "$candidate" ]]; then
+      policy_json="$candidate"
+      break
     fi
+  done
+  if [[ -n "$policy_json" ]]; then
+    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {val=$(i+1); gsub(/[^0-9]/, "", val); print val; exit}}' "$policy_json")
+    cardid=$(awk -F'"' '/"card_id"/{print $4; exit}' "$policy_json")
+    devnum=$(awk -F'[,:}]' '/"dev_num"/{for(i=1;i<=NF;i++) if ($i ~ /"dev_num"/) {val=$(i+1); gsub(/[^0-9]/, "", val); print val; exit}}' "$policy_json")
+    local soxr_raw
+    soxr_raw=$(awk -F'[,:}]' '/"requires_soxr"/{for(i=1;i<=NF;i++) if ($i ~ /"requires_soxr"/) {val=$(i+1); gsub(/[ \t\r\n\"]/, "", val); print val; exit}}' "$policy_json")
+    case "$soxr_raw" in
+      1|true|TRUE) soxr_required=1 ;;
+      *) soxr_required=0 ;;
+    esac
+    if [[ -n "$anchor" ]]; then
+      if [[ "$anchor" == "44100" ]]; then
+        echo "anchor=44100 (AirPlay-native), card=${cardid:-?}, dev=${devnum:-?}"
+      else
+        if [[ $soxr_required -eq 1 ]]; then
+          echo "anchor=${anchor} (+soxr), card=${cardid:-?}, dev=${devnum:-?}"
+        else
+          echo "anchor=${anchor}, card=${cardid:-?}, dev=${devnum:-?}"
+        fi
+      fi
+    else
+      echo "(policy present but anchor missing)"
+    fi
+  else
+    echo "(no AirPlay Wyse policy state found)"
   fi
   if [[ -f /etc/asound.conf ]]; then
-    # quick chain verification: plug -> softvol -> dmix -> hw
-    local ok_plug ok_soft ok_dmix ok_hw
-    ok_plug=$(grep -qi 'pcm.!default' /etc/asound.conf && grep -qi 'type[[:space:]]\+plug' /etc/asound.conf && echo OK || echo NO)
-    ok_soft=$(grep -qi 'pcm._aw_softvol' /etc/asound.conf && echo OK || echo NO)
-    ok_dmix=$(grep -qi 'pcm._aw_dmix' /etc/asound.conf && echo OK || echo NO)
-    ok_hw=$(grep -qi 'pcm._aw_hw' /etc/asound.conf && echo OK || echo NO)
-    echo "chain: plug=${ok_plug} softvol=${ok_soft} dmix=${ok_dmix} hw=${ok_hw}"
-    # Print concise OK if anchor matches dmix rate
-    if [[ "$ok_plug" = OK && "$ok_soft" = OK && "$ok_dmix" = OK && "$ok_hw" = OK ]]; then
-      local dmix_rate
-      dmix_rate=$(awk '/pcm\._aw_dmix/{in=1} in && /rate[[:space:]]+[0-9]+/ {print $2; in=0; exit} in && /^}/ {in=0}' /etc/asound.conf 2>/dev/null | tr -dc '0-9')
-      if [[ -n "$dmix_rate" && -n "${anchor:-}" && "$dmix_rate" = "$anchor" ]]; then
-        if [[ "$anchor" = "44100" ]]; then
-          echo "ALSA sink: OK (anchor=44100)"
-        else
-          if [[ "${soxr_required:-0}" -eq 1 ]]; then
-            echo "ALSA sink: OK (anchor=48000 + soxr)"
-          else
-            echo "ALSA sink: OK (anchor=${dmix_rate})"
-          fi
-        fi
+    local has_hw has_default has_ctl
+    grep -qi 'pcm.airplay_wyse_hw' /etc/asound.conf && has_hw=OK || has_hw=NO
+    if grep -qi 'pcm.!default' /etc/asound.conf && \
+       grep -qi 'type[[:space:]]\+plug' /etc/asound.conf && \
+       grep -qi 'slave.pcm[[:space:]]\+airplay_wyse_hw' /etc/asound.conf; then
+      has_default=OK
+    else
+      has_default=NO
+    fi
+    grep -qi 'ctl.!default' /etc/asound.conf && has_ctl=OK || has_ctl=NO
+    echo "chain: hw=${has_hw} default_plug=${has_default} ctl=${has_ctl}"
+    if [[ -n "$anchor" ]]; then
+      if [[ "$anchor" = "44100" ]]; then
+        echo "ALSA sink: expected anchor=44100"
+      elif [[ "$anchor" = "48000" && $soxr_required -eq 1 ]]; then
+        echo "ALSA sink: expected anchor=48000 with soxr"
+      else
+        echo "ALSA sink: expected anchor=${anchor}"
       fi
     fi
   else

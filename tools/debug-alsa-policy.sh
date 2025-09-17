@@ -9,6 +9,9 @@ OUT_DIR="${AW_DEBUG_DIR:-/tmp/aw-debug}"
 LOG="$OUT_DIR/alsa-policy-debug.log"
 HELPER="${AW_HELPER:-/usr/local/libexec/airplay_wyse/alsa-policy-ensure}"
 DEFAULTS_FILE="/etc/default/airplay_wyse"
+STATE_DIR="/var/lib/airplay_wyse"
+CONFIG_JSON="$STATE_DIR/config.json"
+LEGACY_POLICY="$STATE_DIR/alsa-policy.json"
 
 mkdir -p "$OUT_DIR"
 : >"$LOG"
@@ -57,7 +60,8 @@ collect_env() {
   capture_cmd "System identifiers" uname -a
   capture_cmd "OS release" bash -lc 'cat /etc/os-release'
   capture_cmd "Audio hardware" bash -lc 'aplay -l || true'
-  capture_cmd "Current ALSA policy JSON" bash -lc 'cat /var/lib/airplay_wyse/alsa-policy.json 2>/dev/null || true'
+  capture_cmd "Current AirPlay Wyse state" bash -lc 'cat /var/lib/airplay_wyse/config.json 2>/dev/null || true'
+  capture_cmd "Legacy ALSA policy JSON" bash -lc 'cat /var/lib/airplay_wyse/alsa-policy.json 2>/dev/null || true'
   capture_cmd "Current /etc/asound.conf" bash -lc 'cat /etc/asound.conf 2>/dev/null || true'
   capture_cmd "airplay_wyse defaults" bash -lc "cat '$DEFAULTS_FILE' 2>/dev/null || true"
   capture_cmd "shairport-sync version" bash -lc 'command -v shairport-sync >/dev/null 2>&1 && shairport-sync -V 2>&1 || echo "shairport-sync not in PATH"'
@@ -108,8 +112,17 @@ summarize() {
   else
     log "WARN: shairport-sync not found in PATH."
   fi
-  if grep -q 'soxr_required":1' /var/lib/airplay_wyse/alsa-policy.json 2>/dev/null; then
-    log "Current policy demands soxr (anchor=48000)."
+  local policy_path=""
+  for candidate in "$CONFIG_JSON" "$LEGACY_POLICY"; do
+    if [[ -f "$candidate" ]]; then
+      policy_path="$candidate"
+      break
+    fi
+  done
+  if [[ -n "$policy_path" ]]; then
+    if grep -Eq '"requires_soxr"[[:space:]]*:[[:space:]]*(true|1)' "$policy_path" 2>/dev/null; then
+      log "Current policy demands soxr (anchor=48000)."
+    fi
   fi
   log "Detailed log saved to $LOG"
 }

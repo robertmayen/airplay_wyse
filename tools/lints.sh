@@ -43,7 +43,7 @@ check "PartOf nqptp" "grep -q 'PartOf=nqptp.service' systemd/overrides/shairport
 
 # 4) Idempotent apply
 log "Checking apply semantics..."
-check "apply writes /etc/shairport-sync.conf" "grep -q '/etc/shairport-sync.conf' bin/apply"
+check "aw renders /etc/shairport-sync.conf" "grep -q '/etc/shairport-sync.conf' src/airplay_wyse/config.py"
 
 # 5) Health monitoring basics
 log "Checking health monitoring..."

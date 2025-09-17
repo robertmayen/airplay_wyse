@@ -174,43 +174,48 @@ test_alsa_device() {
   fi
   log "✓ ALSA audio devices are present"
   # Anchor mode and policy checks
-  if [[ -f /var/lib/airplay_wyse/alsa-policy.json ]]; then
-    local aj anchor soxr_required devname chain_ok dmix_rate
-    aj=/var/lib/airplay_wyse/alsa-policy.json
-    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
-    soxr_required=$(awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
+  local policy_json="" anchor="" soxr_required=0
+  for candidate in /var/lib/airplay_wyse/config.json /var/lib/airplay_wyse/alsa-policy.json; do
+    if [[ -f "$candidate" ]]; then
+      policy_json="$candidate"
+      break
+    fi
+  done
+  if [[ -n "$policy_json" ]]; then
+    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {val=$(i+1); gsub(/[^0-9]/, "", val); print val; exit}}' "$policy_json")
+    local soxr_raw
+    soxr_raw=$(awk -F'[,:}]' '/"requires_soxr"/{for(i=1;i<=NF;i++) if ($i ~ /"requires_soxr"/) {val=$(i+1); gsub(/[ \t\r\n\"]/, "", val); print val; exit}}' "$policy_json")
+    case "$soxr_raw" in
+      1|true|TRUE) soxr_required=1 ;;
+      *) soxr_required=0 ;;
+    esac
     if [[ -n "$anchor" ]]; then
       if [[ "$anchor" == "44100" ]]; then
         log "ALSA policy: anchor=44100 (AirPlay-native)"
-      else
+      elif [[ "$anchor" == "48000" && $soxr_required -eq 1 ]]; then
         log "ALSA policy: anchor=48000 (+soxr)"
-      fi
-    fi
-    # Validate ALSA chain and dmix rate in /etc/asound.conf
-    if [[ -f /etc/asound.conf ]]; then
-      local ok_plug ok_soft ok_dmix ok_hw
-      ok_plug=$(grep -qi 'pcm.!default' /etc/asound.conf && grep -qi 'type[[:space:]]\+plug' /etc/asound.conf && echo OK || echo NO)
-      ok_soft=$(grep -qi 'pcm._aw_softvol' /etc/asound.conf && echo OK || echo NO)
-      ok_dmix=$(grep -qi 'pcm._aw_dmix' /etc/asound.conf && echo OK || echo NO)
-      ok_hw=$(grep -qi 'pcm._aw_hw' /etc/asound.conf && echo OK || echo NO)
-      log "ALSA chain: plug=${ok_plug} softvol=${ok_soft} dmix=${ok_dmix} hw=${ok_hw}"
-      soft_or_fail "ALSA default chain is incomplete" bash -c "[[ '$ok_plug' = OK && '$ok_soft' = OK && '$ok_dmix' = OK && '$ok_hw' = OK ]]"
-      dmix_rate=$(awk '/pcm\._aw_dmix/{in=1} in && /rate[[:space:]]+[0-9]+/ {print $2; in=0; exit} in && /^}/ {in=0}' /etc/asound.conf 2>/dev/null | tr -dc '0-9')
-      if [[ -n "$anchor" && -n "$dmix_rate" ]]; then
-        soft_or_fail "dmix slave rate ($dmix_rate) does not match anchor ($anchor)" bash -c "[[ '$dmix_rate' = '$anchor' ]]"
-        if [[ "$dmix_rate" = "44100" ]]; then
-          log "ALSA sink: OK (anchor=44100)"
-        else
-          if [[ "${soxr_required:-0}" -eq 1 ]]; then
-            log "ALSA sink: OK (anchor=48000 + soxr)"
-          else
-            log "ALSA sink: OK (anchor=${dmix_rate})"
-          fi
-        fi
+      else
+        log "ALSA policy: anchor=${anchor}"
       fi
     else
-      soft_or_fail "/etc/asound.conf is missing" false
+      log "ALSA policy state present but anchor missing"
     fi
+  fi
+  if [[ -f /etc/asound.conf ]]; then
+    local has_hw has_default has_ctl
+    grep -qi 'pcm.airplay_wyse_hw' /etc/asound.conf && has_hw=OK || has_hw=NO
+    if grep -qi 'pcm.!default' /etc/asound.conf && \
+       grep -qi 'type[[:space:]]\+plug' /etc/asound.conf && \
+       grep -qi 'slave.pcm[[:space:]]\+airplay_wyse_hw' /etc/asound.conf; then
+      has_default=OK
+    else
+      has_default=NO
+    fi
+    grep -qi 'ctl.!default' /etc/asound.conf && has_ctl=OK || has_ctl=NO
+    log "ALSA chain: hw=${has_hw} default_plug=${has_default} ctl=${has_ctl}"
+    soft_or_fail "ALSA default chain is incomplete" bash -c "[[ '$has_hw' = OK && '$has_default' = OK ]]"
+  else
+    soft_or_fail "/etc/asound.conf is missing" false
   fi
 }
 
@@ -253,7 +258,7 @@ show_alsa() {
 
 check_policy_and_soxr() {
   # Confirm Shairport uses ALSA default device and soxr is present when required
-  local conf_dev soxr_built anchor soxr_required aj
+  local conf_dev soxr_built anchor soxr_required=0
   conf_dev=$(awk 'BEGIN{IGNORECASE=1}
     /^alsa[[:space:]]*=/{insec=1}
     insec && /output_device[[:space:]]*=/ {match($0,/"[^"]+"/); if(RSTART>0){v=substr($0,RSTART+1,RLENGTH-2); print v; exit}}
@@ -262,11 +267,20 @@ check_policy_and_soxr() {
   if [[ -n "$conf_dev" ]]; then
     soft_or_fail "shairport output_device should be 'default' (got '$conf_dev')" bash -c "[[ '$conf_dev' == 'default' ]]"
   fi
-  aj=/var/lib/airplay_wyse/alsa-policy.json
-  if [[ -f "$aj" ]]; then
-    anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
-    soxr_required=$(awk -F'[,:}]' '/"soxr_required"/{for(i=1;i<=NF;i++) if ($i ~ /"soxr_required"/) {print $(i+1); exit}}' "$aj" | tr -dc '0-9')
-  fi
+  for candidate in /var/lib/airplay_wyse/config.json /var/lib/airplay_wyse/alsa-policy.json; do
+    if [[ -f "$candidate" ]]; then
+      anchor=$(awk -F'[,:}]' '/"anchor_hz"/{for(i=1;i<=NF;i++) if ($i ~ /"anchor_hz"/) {val=$(i+1); gsub(/[^0-9]/, "", val); print val; exit}}' "$candidate")
+      local soxr_raw
+      soxr_raw=$(awk -F'[,:}]' '/"requires_soxr"/{for(i=1;i<=NF;i++) if ($i ~ /"requires_soxr"/) {val=$(i+1); gsub(/[ \t\r\n\"]/, "", val); print val; exit}}' "$candidate")
+      if [[ -n "$soxr_raw" ]]; then
+        case "$soxr_raw" in
+          1|true|TRUE) soxr_required=1 ;;
+          *) soxr_required=0 ;;
+        esac
+      fi
+      break
+    fi
+  done
   if shairport-sync -V 2>&1 | grep -q soxr; then soxr_built=1; else soxr_built=0; fi
   if [[ "${soxr_required:-0}" -eq 1 ]]; then
     soft_or_fail "anchor=48000 requires libsoxr support in shairport-sync" bash -c "[[ ${soxr_built} -eq 1 ]]"
