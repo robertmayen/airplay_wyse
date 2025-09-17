@@ -4,6 +4,7 @@ general = {
   name = "{{AIRPLAY_NAME}}";
   mdns_backend = "avahi";
   airplay_device_id = {{AIRPLAY_DEVICE_ID}};
+  hardware_address = {{HW_ADDR}};
   // interface is managed by identity-ensure at boot for stable mDNS.
   // AirPlay 2 device identity (general.airplay_device_id) is also set at boot
   // from the NIC MAC or a stable synthetic fallback to avoid zero-IDs.
