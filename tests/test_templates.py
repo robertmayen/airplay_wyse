@@ -73,6 +73,20 @@ def test_config_alsa_prefix_override():
     assert 'output_device = "plughw:CARD=AUDIO,DEV=0"' in out
 
 
+def test_config_5x_emits_output_format_auto():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
+                 shairport_major="5")
+    assert 'output_format = "auto"' in out
+
+
+def test_config_4x_omits_output_format():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
+                 shairport_major="4")
+    assert "output_format" not in out
+
+
 def test_nqptp_override_grants_bind_capability():
     out = render("nqptp-override.conf.j2")
     assert "AmbientCapabilities=CAP_NET_BIND_SERVICE" in out

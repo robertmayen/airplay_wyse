@@ -15,6 +15,9 @@ alsa = {
   output_device = "{{ airplay_alsa_prefix | default('hw') }}:CARD={{ airplay_alsa_card }},DEV={{ airplay_alsa_device | default(0) }}";
   interpolation = "soxr";
   disable_standby_mode = "always";
+{% if shairport_major | default("4") == "5" %}
+  output_format = "{{ airplay_output_format | default('auto') }}";
+{% endif %}
 {% if airplay_output_rate is defined %}
   output_rate = {{ airplay_output_rate }};
 {% endif %}
