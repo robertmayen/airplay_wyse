@@ -10,3 +10,7 @@
 
 - name: Install diagnostics tool
   ansible.builtin.import_tasks: doctor.yml
+
+- name: Install metadata reader and web dashboard
+  ansible.builtin.import_tasks: dashboard.yml
+  when: airplay_metadata_enabled | bool

@@ -1,0 +1,19 @@
+[Unit]
+Description=AirPlay dashboard web UI ({{ airplay_name }})
+# Managed by airplay_wyse Ansible.
+After=airplay-nowplaying.service network-online.target
+Wants=airplay-nowplaying.service network-online.target
+
+[Service]
+Type=simple
+User={{ airplay_service_user }}
+Group={{ airplay_service_user }}
+Environment="AIRPLAY_NAME={{ airplay_name }}"
+Environment=AIRPLAY_DASHBOARD_PORT={{ airplay_dashboard_port }}
+Environment=AIRPLAY_STATE_DIR=/run/airplay
+ExecStart=/usr/local/bin/airplay-dashboard
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

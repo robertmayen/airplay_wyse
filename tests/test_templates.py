@@ -87,6 +87,24 @@ def test_config_4x_omits_output_format():
     assert "output_format" not in out
 
 
+def test_config_metadata_block_when_enabled():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
+                 airplay_metadata_enabled=True,
+                 airplay_metadata_pipe="/run/shairport-sync/metadata-pipe")
+    assert 'metadata = {' in out
+    assert 'include_cover_art = "yes"' in out
+    assert 'pipe_name = "/run/shairport-sync/metadata-pipe"' in out
+    assert 'dbus_service_bus = "system"' in out
+
+
+def test_config_no_metadata_block_by_default():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="AUDIO", airplay_alsa_device=0)
+    assert "metadata = {" not in out
+    assert "dbus_service_bus" not in out
+
+
 def test_nqptp_override_grants_bind_capability():
     out = render("nqptp-override.conf.j2")
     assert "AmbientCapabilities=CAP_NET_BIND_SERVICE" in out

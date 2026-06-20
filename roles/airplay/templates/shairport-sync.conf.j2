@@ -5,6 +5,9 @@ general = {
 {% if airplay_device_id is defined %}
   airplay_device_id = {{ airplay_device_id }};
 {% endif %}
+{% if airplay_metadata_enabled | default(false) %}
+  dbus_service_bus = "system";
+{% endif %}
 };
 
 sessioncontrol = {
@@ -22,3 +25,12 @@ alsa = {
   output_rate = {{ airplay_output_rate }};
 {% endif %}
 };
+{% if airplay_metadata_enabled | default(false) %}
+
+metadata = {
+  enabled = "yes";
+  include_cover_art = "yes";
+  pipe_name = "{{ airplay_metadata_pipe | default('/run/shairport-sync/metadata-pipe') }}";
+  pipe_timeout = 5000;
+};
+{% endif %}

@@ -11,7 +11,8 @@ _shairport_flags:
   "5": >-
     --sysconfdir=/etc --with-alsa --with-soxr --with-avahi --with-ssl=openssl
     --with-systemd-startup --with-airplay-2
-shairport_configure_flags: "{{ _shairport_flags[shairport_major] }}"
+shairport_configure_flags: >-
+  {{ _shairport_flags[shairport_major] }}{{ ' --with-metadata --with-dbus-interface' if airplay_metadata_enabled | bool else '' }}
 
 # Required runtime features (token-tolerant match against `shairport-sync -V`).
 # ALAC is required only for the major-4 (apple-alac) profile.
@@ -20,6 +21,14 @@ airplay_required_features: "{{ ['AirPlay 2', 'soxr', 'ALAC'] if shairport_major 
 airplay_build_root: /usr/local/src/airplay
 airplay_state_dir: shairport-sync
 airplay_health_timer: false
+
+# Now-playing metadata + D-Bus control + web dashboard (opt-in feature).
+# When true: build shairport with --with-metadata --with-dbus-interface,
+# emit the metadata pipe, and install the nowplaying reader + dashboard.
+airplay_metadata_enabled: false
+# Pipe must live outside /tmp because the hardened unit sets PrivateTmp=yes.
+airplay_metadata_pipe: /run/shairport-sync/metadata-pipe
+airplay_dashboard_port: 8080
 
 # Dedicated system user shairport-sync runs as.
 airplay_service_user: shairport-sync
@@ -44,6 +53,7 @@ airplay_build_deps:
   - libsoxr-dev
   - libplist-dev
   - libplist-utils
+  - libglib2.0-dev
   - libsodium-dev
   - libavutil-dev
   - libavcodec-dev

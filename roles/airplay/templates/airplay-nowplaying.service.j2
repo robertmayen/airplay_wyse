@@ -1,0 +1,21 @@
+[Unit]
+Description=AirPlay now-playing metadata reader ({{ airplay_name }})
+# Managed by airplay_wyse Ansible.
+After=shairport-sync.service
+Wants=shairport-sync.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{ airplay_service_user }}
+Group={{ airplay_service_user }}
+RuntimeDirectory=airplay
+RuntimeDirectoryMode=0755
+Environment=AIRPLAY_METADATA_PIPE={{ airplay_metadata_pipe }}
+Environment=AIRPLAY_STATE_DIR=/run/airplay
+ExecStart=/usr/local/bin/airplay-nowplaying
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,46 @@
+---
+- name: Install airplay-nowplaying reader
+  ansible.builtin.copy:
+    src: airplay_nowplaying.py
+    dest: /usr/local/bin/airplay-nowplaying
+    mode: "0755"
+  notify: Restart airplay-nowplaying
+
+- name: Install airplay-dashboard web UI
+  ansible.builtin.copy:
+    src: airplay_dashboard.py
+    dest: /usr/local/bin/airplay-dashboard
+    mode: "0755"
+  notify: Restart airplay-dashboard
+
+- name: Install airplay-nowplaying unit
+  ansible.builtin.template:
+    src: airplay-nowplaying.service.j2
+    dest: /etc/systemd/system/airplay-nowplaying.service
+    mode: "0644"
+  notify:
+    - Daemon reload
+    - Restart airplay-nowplaying
+
+- name: Install airplay-dashboard unit
+  ansible.builtin.template:
+    src: airplay-dashboard.service.j2
+    dest: /etc/systemd/system/airplay-dashboard.service
+    mode: "0644"
+  notify:
+    - Daemon reload
+    - Restart airplay-dashboard
+
+- name: Enable and start airplay-nowplaying
+  ansible.builtin.systemd:
+    name: airplay-nowplaying
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Enable and start airplay-dashboard
+  ansible.builtin.systemd:
+    name: airplay-dashboard
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -11,6 +11,18 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart airplay-nowplaying
+  ansible.builtin.systemd:
+    name: airplay-nowplaying
+    state: restarted
+    daemon_reload: true
+
+- name: Restart airplay-dashboard
+  ansible.builtin.systemd:
+    name: airplay-dashboard
+    state: restarted
+    daemon_reload: true
+
 - name: Daemon reload
   ansible.builtin.systemd:
     daemon_reload: true
