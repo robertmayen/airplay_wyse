@@ -30,16 +30,20 @@ Create a `host_vars/<hostname>.yml` for each box with at minimum:
 
 ```yaml
 airplay_name: "Living Room"
-airplay_alsa_card: "hw:1,0"   # output of: aplay -L | grep ^hw:
+airplay_alsa_card: "Device"   # the CARD= name from: aplay -L
+airplay_alsa_device: 0        # the DEV= number (usually 0)
 ```
 
-Discover the correct card value on the target:
+Discover the correct values on the target:
 
 ```bash
 aplay -L
 ```
 
-Pick the `hw:<N>,<M>` line that corresponds to your USB DAC.
+Find the `hw:CARD=<name>,DEV=<n>` entry for your USB DAC. Set
+`airplay_alsa_card` to just the `<name>` token (e.g. `"Device"`) and
+`airplay_alsa_device` to the DEV number. The role renders these into
+`hw:CARD=<name>,DEV=<n>` in the shairport-sync config.
 
 ## Rollout Runbook
 
@@ -113,11 +117,18 @@ and the legacy systemd units before the role takes over.
 
 ### 5. Roll to remaining boxes
 
-After the first production cutover is confirmed stable, repeat step 4 for every
-remaining box, then run the fleet-wide doctor:
+After the first production cutover is confirmed stable, repeat for every
+remaining box. Migration must run before site.yml on any box still on the
+legacy stack:
 
 ```bash
-ansible-playbook site.yml
+ansible-playbook migration.yml -l <box> && ansible-playbook site.yml -l <box>
+ansible-playbook doctor.yml -l <box>
+```
+
+Once all boxes are converted, run the fleet-wide doctor:
+
+```bash
 ansible-playbook doctor.yml
 ```
 

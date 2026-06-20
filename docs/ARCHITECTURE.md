@@ -32,15 +32,14 @@ roles/airplay/
 ├── defaults/main.yml   # all tunable variables (version pins, build flags,
 │                       # ALSA card, device name, feature list)
 ├── tasks/
-│   ├── main.yml        # orchestration: install → build → configure → units → doctor
-│   ├── install.yml     # build dependencies, runtime packages
-│   ├── build.yml       # from-source build with stamp, feature verification
-│   ├── configure.yml   # shairport-sync.conf from template, ALSA config
-│   ├── units.yml       # hardened systemd units + drop-in override
+│   ├── main.yml        # orchestration: build → configure → systemd → doctor
+│   ├── build.yml       # build dependencies, from-source compile, feature verification
+│   ├── config.yml      # shairport-sync.conf from template, ALSA config
+│   ├── systemd.yml     # hardened systemd units + drop-in override
 │   └── doctor.yml      # install airplay-doctor tool
 ├── templates/
 │   ├── shairport-sync.conf.j2
-│   └── shairport-sync-override.conf.j2
+│   └── shairport-override.conf.j2
 └── handlers/main.yml   # daemon-reload, restart shairport-sync + nqptp
 ```
 
@@ -64,16 +63,25 @@ when any check fails, making it suitable for use in scripts and CI.
 ## systemd Units
 
 The role writes a hardened drop-in override for the vendor `shairport-sync`
-service. Key hardening settings:
+service (`shairport-override.conf.j2`). Hardening directives present:
 
-- `NoNewPrivileges=true`
+- `NoNewPrivileges=yes`
 - `ProtectSystem=strict`
-- `StateDirectory=shairport-sync` / `CacheDirectory=shairport-sync` (replaces
-  any legacy `ReadWritePaths`)
-- `DeviceAllow=/dev/snd rw` + `DevicePolicy=closed` (explicit DAC access
-  without `PrivateDevices` — which blocks ALSA)
-- `MemoryDenyWriteExecute=true`
+- `ProtectHome=yes`
+- `PrivateTmp=yes`
+- `ProtectKernelTunables=yes`
+- `ProtectKernelModules=yes`
+- `ProtectControlGroups=yes`
 - `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`
+- `SystemCallFilter=@system-service`
+- `StateDirectory` / `CacheDirectory` (replaces any legacy `ReadWritePaths`)
+- `DeviceAllow=char-alsa rw` + `DevicePolicy=closed` (explicit DAC access
+  without `PrivateDevices` — which blocks ALSA)
+- `Requires=nqptp.service` / `After=nqptp.service avahi-daemon.service`
+- `Restart=on-failure`
+
+Note: `MemoryDenyWriteExecute` is intentionally NOT set — it breaks
+FFmpeg/codec libraries used by shairport-sync.
 
 There are **no** boot-time oneshot services for identity, ALSA policy, or
 PipeWire policy. Configuration is applied at provision time by Ansible and
