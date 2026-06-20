@@ -26,6 +26,7 @@
     name: shairport-sync
     enabled: true
     state: started
+    daemon_reload: true
 
 - name: Install health timer (optional)
   when: airplay_health_timer | bool
