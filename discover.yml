@@ -1,0 +1,37 @@
+---
+# Inspect a box's audio hardware so you know what to put in host_vars
+# (airplay_alsa_card / airplay_alsa_device / airplay_alsa_prefix).
+# Usage: ansible-playbook -i inventory/hosts.local.yml discover.yml -l <box>
+- name: Discover ALSA audio outputs
+  hosts: airplay
+  become: true
+  gather_facts: false
+  tasks:
+    - name: List playback hardware (aplay -l)
+      ansible.builtin.command: aplay -l
+      register: aplay_l
+      changed_when: false
+
+    - name: List PCM device names (aplay -L)
+      ansible.builtin.command: aplay -L
+      register: aplay_ll
+      changed_when: false
+
+    - name: Suggest a card - prefer a USB DAC, else the first card
+      ansible.builtin.shell: |
+        set -o pipefail
+        for c in /proc/asound/card*/; do
+          if [ -f "$c/usbid" ]; then cat "$c/id"; exit 0; fi
+        done
+        aplay -L 2>/dev/null | grep -oE 'CARD=[^,]+' | head -1 | cut -d= -f2
+      register: suggested
+      changed_when: false
+      failed_when: false
+
+    - name: Show audio outputs and suggestion
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} |
+          cards: {{ aplay_l.stdout_lines | select('match', '^card') | list }} |
+          hw names: {{ aplay_ll.stdout_lines | select('match', '^(hw|plughw):CARD=') | list }} |
+          SUGGESTED airplay_alsa_card={{ suggested.stdout | trim }}
