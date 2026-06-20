@@ -1,0 +1,53 @@
+---
+- name: Remove legacy airplay_wyse install
+  hosts: airplay
+  become: true
+  gather_facts: false
+  vars:
+    legacy_units:
+      - airplay-wyse-identity.service
+      - airplay-wyse-alsa-policy.service
+      - airplay-wyse-pw-policy.service
+      - airplay-wyse-audio-kmods.service
+      - airplay-wyse-health.service
+      - airplay-wyse-health.timer
+  tasks:
+    - name: Disable and stop legacy units
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop: "{{ legacy_units }}"
+      failed_when: false
+
+    - name: Remove legacy unit files
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item }}"
+        state: absent
+      loop: "{{ legacy_units }}"
+
+    - name: Remove legacy runtime bundle
+      ansible.builtin.file:
+        path: /usr/local/libexec/airplay_wyse
+        state: absent
+
+    - name: Remove legacy state directory
+      ansible.builtin.file:
+        path: /var/lib/airplay_wyse
+        state: absent
+
+    - name: Detect project-managed asound.conf
+      ansible.builtin.command: grep -ilq airplay /etc/asound.conf
+      register: asound_managed
+      changed_when: false
+      failed_when: false
+
+    - name: Remove project-managed asound.conf only
+      ansible.builtin.file:
+        path: /etc/asound.conf
+        state: absent
+      when: asound_managed.rc == 0
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
