@@ -1,0 +1,34 @@
+---
+- name: Collect health from each box
+  hosts: airplay
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run airplay-doctor
+      ansible.builtin.command: /usr/local/bin/airplay-doctor --json
+      register: airplay_doctor_out
+      changed_when: false
+      failed_when: false
+
+    - name: Parse report
+      ansible.builtin.set_fact:
+        airplay_report: "{{ airplay_doctor_out.stdout | from_json }}"
+
+    - name: Show per-host status
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ 'OK' if airplay_report.ok else 'FAIL' }} (device-id {{ airplay_report.device_id }})"
+
+- name: Fleet-wide checks
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Gather all device-ids
+      ansible.builtin.set_fact:
+        fleet_ids: "{{ groups['airplay'] | map('extract', hostvars, ['airplay_report', 'device_id']) | select('string') | list }}"
+
+    - name: Assert device-ids are unique across the fleet
+      ansible.builtin.assert:
+        that:
+          - "fleet_ids | length == fleet_ids | unique | length"
+        fail_msg: "Duplicate AirPlay device-id across the fleet: {{ fleet_ids }}"
+        success_msg: "All fleet device-ids are unique."
