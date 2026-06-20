@@ -1,24 +1,7 @@
-# Minimal convenience targets (documented only; keep logic light)
-
-.PHONY: help format lint test setup apply units
-
-help:
-	@echo "Targets: format lint test setup apply"
-
-format:
-	@echo "(no-op) formatting not configured"
-
+.PHONY: lint test check
 lint:
-	@bash ./tools/lints.sh || true
-
+	yamllint . && ansible-lint
 test:
-	@./bin/test-airplay2 --alsa
-
-setup:
-	@sudo ./bin/setup
-
-apply:
-	@sudo ./bin/apply
-
-units:
-	@sudo ./bin/install-units
+	pytest -v
+check: lint test
+	ansible-playbook --syntax-check site.yml migration.yml doctor.yml

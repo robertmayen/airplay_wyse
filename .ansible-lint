@@ -3,12 +3,6 @@ profile: production
 exclude_paths:
   - docs/
   - tests/
-  - src/
-  - bin/
-  - systemd/
-  - cfg/
-  - profiles/
-  - tools/
 # shairport_* and _shairport_flags are intentional cross-role shared names
 # used by Tasks 7–9; role-prefix rule is skipped for this role only.
 warn_list:

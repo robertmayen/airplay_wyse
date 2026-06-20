@@ -1,101 +1,184 @@
 # AirPlay Wyse
 
-AirPlay Wyse turns a Wyse 5070 (or any small Debian box with a USB DAC) into a lean AirPlay 2 endpoint.  The repo now ships a single Python-driven `aw` CLI that owns every privileged action: provisioning packages, writing `/etc/shairport-sync.conf`, keeping ALSA/PipeWire policy in sync, and maintaining a stable AirPlay identity.
+Turns a Wyse 5070 (or any small Debian 13 box with a USB DAC) into an AirPlay 2 endpoint.
+Managed entirely by Ansible — no on-device Python CLI, no boot-time oneshots.
 
-## Why the rewrite?
+## Prerequisites
 
-Previous revisions accreted shell helpers that called each other in unpredictable ways. The new layout replaces that pile with:
+- Control machine with Python 3.11+ and Ansible.
+- SSH access (key-based, passwordless sudo preferred) to every target box.
+- Install dev dependencies (yamllint, ansible-lint, pytest, etc.):
 
-- **One CLI (`aw`)** with well-defined subcommands (`setup`, `apply`, `identity`, `policy-alsa`, `policy-pipewire`, `systemd`, `health`).  All wrappers under `bin/` simply defer to it.
-- **State in one place** – `/var/lib/airplay_wyse/config.json` tracks the rendered Shairport settings, ALSA probe results, PipeWire policy and identity fingerprints.
-- **Deterministic rendering** – every run re-renders config from a template using that state, so there is no post-hoc file surgery.
-- **Runtime bundle** – `aw setup` copies the minimal runtime (Python package + templates + wrappers) to `/usr/local/libexec/airplay_wyse/`, so systemd services execute the same code as the CLI.
+  ```bash
+  pip install -r requirements-dev.txt
+  ```
 
-## Quick Start
+## Inventory and host_vars
 
-Clone the repo on the target host and run (as root):
+Edit `inventory/hosts.yml` to list your boxes under the `airplay` group:
 
-```bash
-sudo ./bin/setup --name "Living Room"
+```yaml
+airplay:
+  hosts:
+    living-room:
+      ansible_host: 192.168.1.10
+    kitchen:
+      ansible_host: 192.168.1.11
 ```
 
-`setup` performs the entire bootstrap in one pass:
+Create a `host_vars/<hostname>.yml` for each box with at minimum:
 
-1. Installs `shairport-sync`, `nqptp`, and supporting packages if missing.
-2. Detects the preferred ALSA card (`hw:X,Y`), writes a simple `/etc/asound.conf`, and stores the probe in state.
-3. Generates `/etc/shairport-sync.conf` from the template with sane defaults and unique identity placeholders.
-4. Copies the runtime bundle to `/usr/local/libexec/airplay_wyse/` and refreshes the systemd units.
-5. Enables/starts `nqptp`, `shairport-sync`, and the AirPlay Wyse helper units.
-
-You can update settings later with:
-
-```bash
-sudo ./bin/apply --name "Kitchen" --mixer PCM
+```yaml
+airplay_name: "Living Room"
+airplay_alsa_card: "hw:1,0"   # output of: aplay -L | grep ^hw:
 ```
 
-Both commands accept the same overrides:
+Discover the correct card value on the target:
 
-| Flag            | Purpose                                   |
-|-----------------|--------------------------------------------|
-| `--name`        | Advertised name (default still auto-unique)|
-| `--mixer`       | Optional ALSA mixer control                |
-| `--interface`   | Bind mDNS to a specific NIC                |
-| `--device`      | Hint the preferred hw:X,Y card             |
-| `--statistics` / `--no-statistics` | Toggle Shairport diagnostics |
-| `--force-identity` (setup/apply) | Rebuild AirPlay identity before restart |
-| `--force-rate` (setup) | Pin PipeWire clock (44100/48000/88200/96000) |
+```bash
+aplay -L
+```
 
-## What runs on boot?
+Pick the `hw:<N>,<M>` line that corresponds to your USB DAC.
 
-Three oneshot services remain, but now they are thin wrappers around `aw`:
+## Rollout Runbook
 
-| Unit | Action |
-|------|--------|
-| `airplay-wyse-audio-kmods.service` | (Optional) pre-loads kernel modules – unchanged |
-| `airplay-wyse-alsa-policy.service` | Executes `aw policy-alsa --json` to ensure `/etc/asound.conf` matches the current hardware |
-| `airplay-wyse-pw-policy.service`   | Executes `aw policy-pipewire --json` if PipeWire is present |
-| `airplay-wyse-identity.service`    | Executes `aw identity ensure` before `shairport-sync` starts |
+### 1. Capture baseline on the existing working box
 
-Because the CLI writes state and config idempotently, these oneshots no longer mutate files that `setup`/`apply` subsequently touch by hand.
+Run these commands on a box that is already working (or the box you are about to provision):
 
-## Identity management
+```bash
+shairport-sync -V
+cat /etc/os-release
+cat /etc/shairport-sync.conf
+cat /etc/asound.conf
+```
 
-`aw identity ensure` (and the service above) guarantees:
+Compare the reported shairport version against `shairport_sync_version` in
+`group_vars/airplay.yml`. If they differ, update `shairport_sync_version` in
+`group_vars/airplay.yml` to match what is installed, or pin to `4.3.7`
+(the tested version) for consistency across the fleet.
 
-- A stable Shairport AirPlay 2 identifier derived from the chosen interface MAC (falling back to a synthetic, locally-administered MAC when necessary).
-- `hardware_address` is always non-zero so classic RAOP advertising stays selectable.
-- Cloned images are auto-healed by clearing Shairport’s state the first time a new fingerprint (machine-id + hostname + MAC) is detected.
+### 2. Build / syntax smoke — VM or container (optional)
 
-Calling `./bin/identity-ensure --force` resets identity immediately and re-renders the Shairport config with the updated values.
+Verify the playbook parses and the from-source build completes:
 
-## ALSA & PipeWire policy
+```bash
+ansible-playbook --syntax-check site.yml migration.yml doctor.yml
+ansible-playbook site.yml -l <vm-or-container>
+```
 
-`aw policy-alsa` inspects `/proc/asound/card*/stream*` when available to decide whether the DAC natively supports 44.1 kHz. It writes a small `/etc/asound.conf` that maps `pcm.!default` to the preferred hardware device. If only 48 kHz is available, the CLI ensures Shairport is compiled with libsoxr and sets `output_rate`/`interpolation` accordingly.
+**Note:** AirPlay 2 timing relies on NQPTP's UDP 319/320 and precise clock
+synchronisation. VMs and containers are **not valid** for audio, sync, or
+pairing tests. Use this stage only to catch build errors and role logic.
 
-PipeWire is optional: if detected, `aw policy-pipewire` writes `/etc/pipewire/pipewire.conf.d/90-airplay_wyse.conf` with a conservative set of allowed clock rates (and an optional forced rate).
+### 3. Physical spare box — hardening, audio, and sync matrix
 
-## Health & diagnostics
+Before touching any production box, run the full role on a spare physical machine
+and verify every item in the matrix:
 
-- `./bin/health-probe` → short JSON or human summary of service status.
-- `./bin/identity-ensure --force` → reset identity on cloned hosts.
-- Legacy helpers such as `bin/debug-audio` and `bin/test-airplay2` remain for now; they execute unchanged, but the underlying helpers now route through the Python CLI.
+```bash
+ansible-playbook site.yml -l spare-box
+```
 
-## Repository layout
+Matrix checklist:
+
+- [ ] `systemctl is-active shairport-sync` → active
+- [ ] AirPlay 2 pairing survives `systemctl restart shairport-sync`
+- [ ] DAC plays: `aplay -D hw:<N>,<M> /usr/share/sounds/alsa/Front_Center.wav`
+- [ ] `airplay-doctor --check` exits 0
+- [ ] Real audio stream syncs with at least one other AirPlay 2 speaker on the network
+
+Do not proceed to production until all items are green.
+
+### 4. Working-box cutover
+
+For each box currently running the **old** Python/shell stack:
+
+```bash
+# Clean up legacy state, units, and libexec bundle
+ansible-playbook migration.yml -l <working-box>
+
+# Apply the Ansible role
+ansible-playbook site.yml -l <working-box>
+
+# Verify
+ansible-playbook doctor.yml -l <working-box>
+# or on the box:
+airplay-doctor --check
+```
+
+The migration playbook removes `/var/lib/airplay_wyse/`, `/usr/local/libexec/airplay_wyse/`,
+and the legacy systemd units before the role takes over.
+
+### 5. Roll to remaining boxes
+
+After the first production cutover is confirmed stable, repeat step 4 for every
+remaining box, then run the fleet-wide doctor:
+
+```bash
+ansible-playbook site.yml
+ansible-playbook doctor.yml
+```
+
+`doctor.yml` also checks for duplicate AirPlay device IDs across the fleet —
+fix any duplicates by setting `airplay_device_id` in the relevant `host_vars/`.
+
+## Day-2 Operations
+
+### Updating shairport-sync version
+
+1. Bump `shairport_sync_version` (and `shairport_sync_sha256`) in `group_vars/airplay.yml`.
+2. Re-run `site.yml` against the spare box first (step 3 above).
+3. Roll to the fleet once the spare-box matrix is green.
+
+### Drift correction
+
+Re-run `site.yml` — the role is fully idempotent:
+
+```bash
+ansible-playbook site.yml
+```
+
+### Major-version opt-in (5.x)
+
+`shairport_major: "5"` is an explicit opt-in in `group_vars/airplay.yml`.
+It **must** pass the full spare-box matrix (step 3) before being applied to
+any production box. 5.x changes the DACP/RTSP session model; verify pairing,
+sync, and audio stability before rolling out.
+
+### Health check
+
+```bash
+ansible-playbook doctor.yml
+# or on the box:
+airplay-doctor --check
+airplay-doctor --deep --json   # extended probe (opens ALSA device)
+```
+
+## Repository Layout
 
 ```
 airplay_wyse/
-├── bin/              # Thin wrappers around the aw CLI
-├── cfg/              # Shairport template
-├── docs/             # Operations/architecture notes
-├── src/airplay_wyse/ # Python runtime used by the CLI and systemd units
-├── systemd/          # Service definitions and shairport override
-└── tools/            # Optional troubleshooting helpers
+├── inventory/          # hosts.yml + host_vars/
+├── group_vars/         # airplay.yml (version pins, build flags)
+├── roles/
+│   └── airplay/        # from-source build, config, hardened systemd, doctor
+│       ├── defaults/   # all tunable variables
+│       ├── tasks/      # install → build → configure → units → doctor
+│       ├── templates/  # shairport-sync.conf.j2, unit overrides
+│       └── handlers/   # daemon-reload + service restart
+├── site.yml            # full provisioning (converge)
+├── migration.yml       # one-time cleanup of the old Python/shell stack
+├── doctor.yml          # non-invasive fleet health + duplicate-id check
+├── docs/               # ARCHITECTURE.md, OPERATIONS.md
+└── tests/              # pytest suite for airplay-doctor parsers
 ```
 
-## Runtime installation
+## Linting and Testing
 
-`aw setup` copies the runtime to `/usr/local/libexec/airplay_wyse/`. Systemd services call scripts in that directory, so you can safely delete the git checkout afterwards or switch to an artifact-based workflow. To update, refresh the repo, rerun `sudo ./bin/setup`, and the runtime bundle + units will be refreshed automatically.
-
-## Looking ahead
-
-This rewrite focuses on determinism and clarity. Future work can layer better diagnostics on top of the Python core or shrink the remaining shell helpers, but the foundation is now a small, testable codebase instead of a web of shell snippets.
+```bash
+make lint    # yamllint + ansible-lint
+make test    # pytest (airplay-doctor parser tests)
+make check   # lint + test + syntax-check all playbooks
+```

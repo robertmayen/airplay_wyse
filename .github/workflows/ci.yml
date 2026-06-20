@@ -19,6 +19,6 @@ jobs:
       - name: ansible-lint
         run: ansible-lint
       - name: syntax-check
-        run: ansible-playbook --syntax-check site.yml
+        run: ansible-playbook --syntax-check site.yml migration.yml doctor.yml
       - name: pytest
         run: pytest -v
