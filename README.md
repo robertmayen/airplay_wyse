@@ -59,8 +59,8 @@ cat /etc/asound.conf
 ```
 
 Compare the reported shairport version against `shairport_sync_version` in
-`group_vars/airplay.yml`. If they differ, update `shairport_sync_version` in
-`group_vars/airplay.yml` to match what is installed, or pin to `4.3.7`
+`inventory/group_vars/airplay.yml`. If they differ, update `shairport_sync_version` in
+`inventory/group_vars/airplay.yml` to match what is installed, or pin to `4.3.7`
 (the tested version) for consistency across the fleet.
 
 ### 2. Build / syntax smoke — VM or container (optional)
@@ -139,7 +139,7 @@ fix any duplicates by setting `airplay_device_id` in the relevant `host_vars/`.
 
 ### Updating shairport-sync version
 
-1. Bump `shairport_sync_version` (and `shairport_sync_sha256`) in `group_vars/airplay.yml`.
+1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in `inventory/group_vars/airplay.yml`.
 2. Re-run `site.yml` against the spare box first (step 3 above).
 3. Roll to the fleet once the spare-box matrix is green.
 
@@ -153,7 +153,7 @@ ansible-playbook site.yml
 
 ### Major-version opt-in (5.x)
 
-`shairport_major: "5"` is an explicit opt-in in `group_vars/airplay.yml`.
+`shairport_major: "5"` is an explicit opt-in in `inventory/group_vars/airplay.yml`.
 It **must** pass the full spare-box matrix (step 3) before being applied to
 any production box. 5.x changes the DACP/RTSP session model; verify pairing,
 sync, and audio stability before rolling out.
@@ -172,7 +172,7 @@ airplay-doctor --deep --json   # extended probe (opens ALSA device)
 ```
 airplay_wyse/
 ├── inventory/          # hosts.yml + host_vars/
-├── group_vars/         # airplay.yml (version pins, build flags)
+├── inventory/group_vars/  # airplay.yml (version pins, build flags)
 ├── roles/
 │   └── airplay/        # from-source build, config, hardened systemd, doctor
 │       ├── defaults/   # all tunable variables

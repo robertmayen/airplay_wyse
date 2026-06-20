@@ -64,8 +64,8 @@ airplay-doctor --deep             # adds ALSA device-open probe (optional)
 
 ## Updating shairport-sync
 
-1. Update `shairport_sync_version` and `shairport_sync_sha256` in
-   `group_vars/airplay.yml`.
+1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in
+   `inventory/group_vars/airplay.yml`.
 2. Run `site.yml` against the spare box and verify the spare-box matrix
    (see README rollout runbook, step 3).
 3. Roll to the fleet:

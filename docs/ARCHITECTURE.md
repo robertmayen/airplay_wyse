@@ -13,7 +13,7 @@ machine.
 ### shairport-sync
 
 Built from source at a pinned version (`shairport_sync_version` in
-`group_vars/airplay.yml`) with an explicit feature flag set
+`inventory/group_vars/airplay.yml`) with an explicit feature flag set
 (`airplay_required_features`). The build is stamped and re-run only when the
 stamp file does not exist or the version pin changes. After building, the role
 verifies that the installed binary advertises every required feature before

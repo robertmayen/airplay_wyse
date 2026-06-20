@@ -48,6 +48,11 @@
         state: absent
       when: asound_managed.rc == 0
 
+    - name: Remove legacy shairport-sync override drop-in
+      ansible.builtin.file:
+        path: /etc/systemd/system/shairport-sync.service.d/override.conf
+        state: absent
+
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
