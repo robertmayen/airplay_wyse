@@ -1,0 +1,6 @@
+---
+- name: Install airplay-doctor
+  ansible.builtin.copy:
+    src: airplay_doctor.py
+    dest: /usr/local/bin/airplay-doctor
+    mode: "0755"
