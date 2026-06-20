@@ -1,0 +1,130 @@
+---
+- name: Install build dependencies
+  ansible.builtin.apt:
+    name: "{{ airplay_build_deps }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure build root exists
+  ansible.builtin.file:
+    path: "{{ airplay_build_root }}"
+    state: directory
+    mode: "0755"
+
+- name: Read existing build stamp
+  ansible.builtin.slurp:
+    src: /usr/local/share/airplay/.versions
+  register: airplay_stamp_raw
+  failed_when: false
+
+- name: Compute desired build signature
+  ansible.builtin.set_fact:
+    airplay_build_signature: >-
+      shairport={{ shairport_sync_version }}|nqptp={{ nqptp_version }}|
+      alac={{ alac_ref }}|flags={{ shairport_configure_flags }}
+    airplay_stamp_current: "{{ (airplay_stamp_raw.content | b64decode | from_json) if airplay_stamp_raw.content is defined else {} }}"
+
+- name: Decide whether a rebuild is needed
+  ansible.builtin.set_fact:
+    airplay_needs_build: "{{ airplay_stamp_current.get('signature', '') != airplay_build_signature }}"
+
+- name: Build and install ALAC (major 4 only)
+  when: shairport_major == "4" and airplay_needs_build
+  block:
+    - name: Clone ALAC
+      ansible.builtin.git:
+        repo: https://github.com/mikebrady/alac
+        dest: "{{ airplay_build_root }}/alac"
+        version: "{{ alac_ref }}"
+    - name: Build ALAC
+      ansible.builtin.shell: |
+        set -e
+        autoreconf -fi
+        ./configure
+        make
+        make install
+        ldconfig
+      args:
+        chdir: "{{ airplay_build_root }}/alac"
+        creates: /usr/local/lib/libalac.so
+      changed_when: false
+
+- name: Build and install nqptp
+  when: airplay_needs_build
+  block:
+    - name: Clone nqptp
+      ansible.builtin.git:
+        repo: https://github.com/mikebrady/nqptp
+        dest: "{{ airplay_build_root }}/nqptp"
+        version: "{{ nqptp_version }}"
+        force: true
+    - name: Build nqptp
+      ansible.builtin.shell: |
+        set -e
+        autoreconf -fi
+        ./configure --with-systemd-startup
+        make
+        make install
+      args:
+        chdir: "{{ airplay_build_root }}/nqptp"
+      changed_when: true
+
+- name: Build and install shairport-sync
+  when: airplay_needs_build
+  block:
+    - name: Clone shairport-sync
+      ansible.builtin.git:
+        repo: https://github.com/mikebrady/shairport-sync
+        dest: "{{ airplay_build_root }}/shairport-sync"
+        version: "{{ shairport_sync_version }}"
+        force: true
+    - name: Build shairport-sync
+      ansible.builtin.shell: |
+        set -e
+        autoreconf -fi
+        ./configure {{ shairport_configure_flags }}
+        make
+        make install
+      args:
+        chdir: "{{ airplay_build_root }}/shairport-sync"
+      changed_when: true
+      notify: Restart shairport-sync
+
+# --- Feature verification runs EVERY play, regardless of the stamp ---
+- name: Capture shairport-sync version string
+  ansible.builtin.command: shairport-sync -V
+  register: airplay_sps_version
+  changed_when: false
+
+- name: Assert required shairport features are present (token-tolerant)
+  ansible.builtin.assert:
+    that:
+      - "feature | lower | replace(' ', '') in (airplay_sps_version.stdout | lower | replace(' ', ''))"
+    fail_msg: "shairport-sync is missing required feature: {{ feature }}"
+  loop: "{{ airplay_required_features }}"
+  loop_control:
+    loop_var: feature
+
+- name: Capture nqptp version (uppercase -V)
+  ansible.builtin.command: nqptp -V
+  register: airplay_nqptp_version
+  changed_when: false
+  failed_when: airplay_nqptp_version.rc != 0
+
+- name: Write build stamp
+  ansible.builtin.copy:
+    dest: /usr/local/share/airplay/.versions
+    mode: "0644"
+    content: |
+      {{
+        {
+          "signature": airplay_build_signature,
+          "shairport_version": shairport_sync_version,
+          "nqptp_version": nqptp_version,
+          "alac_ref": alac_ref,
+          "configure_flags": shairport_configure_flags,
+          "shairport_v_output": airplay_sps_version.stdout,
+          "nqptp_v_output": airplay_nqptp_version.stdout
+        } | to_nice_json
+      }}
