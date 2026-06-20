@@ -53,6 +53,23 @@
         path: /etc/systemd/system/shairport-sync.service.d/override.conf
         state: absent
 
+    - name: Remove legacy hand-built shairport helper scripts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/shairport-output-detect
+        - /usr/local/bin/shairport-udev-restart
+
+    - name: Remove legacy shairport udev hotplug rule
+      ansible.builtin.file:
+        path: /etc/udev/rules.d/99-shairport-hotplug.rules
+        state: absent
+
+    - name: Reload udev rules
+      ansible.builtin.command: udevadm control --reload-rules
+      changed_when: false
+
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
