@@ -12,7 +12,7 @@ sessioncontrol = {
 };
 
 alsa = {
-  output_device = "hw:CARD={{ airplay_alsa_card }},DEV={{ airplay_alsa_device | default(0) }}";
+  output_device = "{{ airplay_alsa_prefix | default('hw') }}:CARD={{ airplay_alsa_card }},DEV={{ airplay_alsa_device | default(0) }}";
   interpolation = "soxr";
   disable_standby_mode = "always";
 {% if airplay_output_rate is defined %}

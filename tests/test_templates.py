@@ -64,3 +64,20 @@ def test_config_default_dev_when_alsa_device_omitted():
 def test_override_has_after_ordering():
     out = render("shairport-override.conf.j2", airplay_state_dir="shairport-sync")
     assert "After=nqptp.service avahi-daemon.service" in out
+
+
+def test_config_alsa_prefix_override():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
+                 airplay_alsa_prefix="plughw")
+    assert 'output_device = "plughw:CARD=AUDIO,DEV=0"' in out
+
+
+def test_unit_no_output_detect_runs_as_user():
+    out = render("shairport-sync.service.j2", airplay_name="living room",
+                 airplay_service_user="shairport-sync")
+    assert "shairport-output-detect" not in out
+    assert "User=shairport-sync" in out
+    assert "ExecStart=/usr/local/bin/shairport-sync -c /etc/shairport-sync.conf" in out
+    assert "living room" in out
+    assert "Restart=on-failure" in out

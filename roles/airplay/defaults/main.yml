@@ -21,6 +21,14 @@ airplay_build_root: /usr/local/src/airplay
 airplay_state_dir: shairport-sync
 airplay_health_timer: false
 
+# Dedicated system user shairport-sync runs as.
+airplay_service_user: shairport-sync
+
+# ALSA device addressing. "hw" = raw device (exclusive, soxr does any resampling);
+# "plughw" = ALSA plug layer (automatic format/rate conversion, most tolerant).
+# Set to "plughw" per-host if a DAC rejects the raw format.
+airplay_alsa_prefix: "hw"
+
 airplay_build_deps:
   - build-essential
   - git

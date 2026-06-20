@@ -1,4 +1,28 @@
 ---
+- name: Ensure shairport-sync group
+  ansible.builtin.group:
+    name: "{{ airplay_service_user }}"
+    system: true
+
+- name: Ensure shairport-sync user
+  ansible.builtin.user:
+    name: "{{ airplay_service_user }}"
+    group: "{{ airplay_service_user }}"
+    groups: audio
+    append: true
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Install managed shairport-sync unit
+  ansible.builtin.template:
+    src: shairport-sync.service.j2
+    dest: /etc/systemd/system/shairport-sync.service
+    mode: "0644"
+  notify:
+    - Daemon reload
+    - Restart shairport-sync
+
 - name: Ensure shairport-sync override directory
   ansible.builtin.file:
     path: /etc/systemd/system/shairport-sync.service.d
