@@ -1,26 +1,24 @@
+---
 name: CI
-
 on:
   push:
   pull_request:
 
 jobs:
-  tests:
+  lint-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ripgrep
-
-      - name: Lints
-        run: |
-          bash ./tools/lints.sh || true
-
-      - name: Health (non-strict)
-        run: |
-          chmod +x ./bin/test-airplay2
-          ./bin/test-airplay2 --no-strict || true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt
+      - name: yamllint
+        run: yamllint .
+      - name: ansible-lint
+        run: ansible-lint
+      - name: syntax-check
+        run: ansible-playbook --syntax-check site.yml
+      - name: pytest
+        run: pytest -v

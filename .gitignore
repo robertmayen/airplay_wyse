@@ -19,6 +19,7 @@ __pycache__/
 .env.local
 .envrc
 venv/
+.venv/
 .direnv/
 
 # Build artifacts

@@ -1,0 +1,5 @@
+---
+- name: Provision AirPlay 2 endpoints
+  hosts: airplay
+  become: true
+  roles: []

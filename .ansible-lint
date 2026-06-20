@@ -1,0 +1,11 @@
+---
+profile: production
+exclude_paths:
+  - docs/
+  - tests/
+  - src/
+  - bin/
+  - systemd/
+  - cfg/
+  - profiles/
+  - tools/
