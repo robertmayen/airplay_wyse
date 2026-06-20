@@ -146,8 +146,13 @@ its stamp matches the requested pin/flags **and** the binary exists.
 
 A stale stamp must never mask a broken binary, so **every run** (independent of
 the stamp) verifies the installed binaries expose the required features:
-`shairport-sync -V` must contain `AirPlay 2`, `soxr`, and (major 4) `ALAC`;
-`nqptp -v` runs clean. Missing features fail the play.
+`shairport-sync -V` must report AirPlay 2, soxr, and (major 4) ALAC support, and
+`nqptp -V` (uppercase) returns a version cleanly. Missing features fail the play.
+
+The feature parser must be **token-tolerant**: upstream `-V` strings vary across
+versions (e.g. `AirPlay2` vs `AirPlay 2`, casing of `soxr`/`alac`), so match
+normalized/whitespace-insensitive substrings rather than exact literals, seeded
+from the captured baseline `-V` of the working box.
 
 ## Identity (simplified, with escape hatch)
 
@@ -158,18 +163,24 @@ the hardware MAC. The only required per-host identity input is `airplay_name`.
   fingerprinting, `/var/lib/airplay_wyse` identity state.
 - **Escape hatch:** `airplay_device_id` is an optional per-host var; when set it
   is templated into the config to pin the id independent of hardware.
-- `airplay-doctor` flags a zero device-id and detects **duplicate** ids across
-  the fleet (from rendered config + observed mDNS), since collisions break
-  multi-box AirPlay.
+- **Duplicate-id detection is split by scope.** The on-box `airplay-doctor`
+  reports its own device-id (from rendered config) plus its observed mDNS data,
+  and flags a *zero* id locally. **Cross-host duplicate detection lives in
+  `doctor.yml` aggregation**, which collects every box's `--json` report and
+  compares device-ids across the fleet — a single box cannot reliably know the
+  others' ids on its own.
 
 ## Config
 
 Minimal, templated per host:
 
 - `name = "{{ airplay_name }}"`
-- direct ALSA output pinned by **stable name**:
-  `output_device = "hw:CARD={{ airplay_alsa_card }}"` (survives USB
-  re-enumeration; keeps the fork's one genuine improvement over nicokaiser)
+- direct ALSA output pinned by **stable name + explicit device**:
+  `output_device = "hw:CARD={{ airplay_alsa_card }},DEV={{ airplay_alsa_device }}"`
+  with `airplay_alsa_device` defaulting to `0` (survives USB re-enumeration; keeps
+  the fork's one genuine improvement over nicokaiser). The explicit `DEV=` matters
+  on multi-PCM cards (e.g. HDMI) where card-only addressing is ambiguous; USB DACs
+  are typically `DEV=0`.
 - `interpolation = "soxr"`
 - `disable_standby_mode = "always"` (USB-DAC pop avoidance, upstream-recommended)
 - `output_rate` only when the DAC cannot do native 44.1 kHz
@@ -216,8 +227,9 @@ Single stdlib file, no dependencies. Modes:
   avahi-daemon), shairport build features from `-V`, nqptp ownership of UDP
   319/320 (`ss`), mDNS advertisement of `_airplay._tcp`/`_raop._tcp`, config
   parse, ALSA card **existence** via `aplay -L` (read-only, does not open the
-  device), device-id non-zero + fleet-duplicate detection, built-vs-pinned
-  version, recent xrun/sync errors from journalctl. Exit non-zero on failure.
+  device), local device-id non-zero, built-vs-pinned version, recent xrun/sync
+  errors from journalctl. Exit non-zero on failure. (Fleet-wide duplicate-id
+  comparison is done by `doctor.yml`, not the on-box tool.)
 - `--deep` (opt-in): adds device-open / short playback probe. Excluded from
   default because opening `hw:` can disrupt shairport's exclusive access while it
   is streaming.
@@ -260,11 +272,16 @@ manual/nightly molecule job, not part of required CI.
 
 1. **Capture baseline** from the working box: `shairport-sync -V`, OS version,
    current config. Set the version pins to match.
-2. **Provision a spare/test box (or VM)** with `site.yml`.
-3. Run the **hardening test matrix** on the spare: confirm shairport starts under
-   the override, AirPlay 2 pairing persists across restart (validates
-   `StateDirectory`), DAC plays (validates `DeviceAllow`/`DevicePolicy`),
-   `airplay-doctor --check` passes, and a real stream syncs.
+2. **Build/syntax smoke (VM or container, optional):** a VM is acceptable *only*
+   for verifying the playbook runs, the source build completes, and config
+   renders. It is **not** valid for audio/timing validation — upstream warns
+   AirPlay 2 timing is unreliable in VMs.
+3. **Provision a physical spare box** with `site.yml` and run the **hardening /
+   audio / sync test matrix on real hardware**: shairport starts under the
+   override, AirPlay 2 pairing persists across restart (validates
+   `StateDirectory`), the DAC plays (validates `DeviceAllow`/`DevicePolicy`),
+   `airplay-doctor --check` passes, and a real stream syncs with another AirPlay 2
+   speaker. This step requires physical hardware, not a VM.
 4. Only then run `migration.yml` + `site.yml` against the **working box**.
 5. Roll to remaining boxes.
 
