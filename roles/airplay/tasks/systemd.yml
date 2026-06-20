@@ -38,6 +38,21 @@
     - Daemon reload
     - Restart shairport-sync
 
+- name: Ensure nqptp override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/nqptp.service.d
+    state: directory
+    mode: "0755"
+
+- name: Install nqptp capability override
+  ansible.builtin.template:
+    src: nqptp-override.conf.j2
+    dest: /etc/systemd/system/nqptp.service.d/10-airplay.conf
+    mode: "0644"
+  notify:
+    - Daemon reload
+    - Restart nqptp
+
 - name: Enable and start nqptp
   ansible.builtin.systemd:
     name: nqptp

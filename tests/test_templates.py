@@ -73,6 +73,12 @@ def test_config_alsa_prefix_override():
     assert 'output_device = "plughw:CARD=AUDIO,DEV=0"' in out
 
 
+def test_nqptp_override_grants_bind_capability():
+    out = render("nqptp-override.conf.j2")
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE" in out
+    assert "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" in out
+
+
 def test_unit_no_output_detect_runs_as_user():
     out = render("shairport-sync.service.j2", airplay_name="living room",
                  airplay_service_user="shairport-sync")

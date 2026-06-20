@@ -5,6 +5,12 @@
     state: restarted
     daemon_reload: true
 
+- name: Restart nqptp
+  ansible.builtin.systemd:
+    name: nqptp
+    state: restarted
+    daemon_reload: true
+
 - name: Daemon reload
   ansible.builtin.systemd:
     daemon_reload: true

@@ -1,0 +1,7 @@
+[Service]
+# Managed by airplay_wyse Ansible.
+# nqptp runs as an unprivileged user but must bind privileged UDP ports
+# 319/320. Grant the capability via systemd instead of relying on a setcap
+# on the binary (which a rebuild/make-install would silently wipe).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
