@@ -121,6 +121,14 @@ def test_report_fails_on_zero_device_id():
     assert r["ok"] is False
 
 
+def test_report_ok_when_device_id_not_pinned():
+    # config without airplay_device_id -> shairport derives it from the MAC;
+    # this is the normal case and must NOT be reported as a failure.
+    r = ad.build_report(_fixture_runner({"config": 'output_device = "hw:CARD=Device,DEV=0";\n'}))
+    assert r["ok"] is True
+    assert any(c["name"] == "identity:device-id" and c["ok"] for c in r["checks"])
+
+
 def test_main_json_exit_code(capsys):
     rc = ad.main(["--json"], runner=_fixture_runner())
     out = capsys.readouterr().out

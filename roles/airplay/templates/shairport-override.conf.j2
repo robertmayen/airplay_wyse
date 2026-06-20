@@ -1,5 +1,9 @@
-[Service]
+[Unit]
 # Managed by airplay_wyse Ansible.
+Requires=nqptp.service
+After=nqptp.service avahi-daemon.service
+
+[Service]
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -7,12 +11,13 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# AF_NETLINK is required: shairport-sync reads the NIC MAC via getifaddrs()
+# (a netlink socket) to derive the AirPlay device ID. Without it, the device
+# gets no ID and stops advertising over mDNS.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallFilter=@system-service
 StateDirectory={{ airplay_state_dir }}
 CacheDirectory={{ airplay_state_dir }}
 DeviceAllow=char-alsa rw
 DevicePolicy=closed
-Requires=nqptp.service
-After=nqptp.service avahi-daemon.service
 Restart=on-failure

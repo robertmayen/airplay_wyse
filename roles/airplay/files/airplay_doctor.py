@@ -129,7 +129,11 @@ def build_report(runner, deep: bool = False) -> dict:
 
     conf = runner("config")
     dev_id = parse_device_id(conf)
-    checks.append(_check("identity:device-id", not is_zero_device_id(dev_id), dev_id))
+    # device-id is optional in the config: when it is not pinned, shairport-sync
+    # derives it from the NIC MAC at runtime (the normal case). Only an
+    # explicitly-pinned all-zero id is a real misconfiguration.
+    id_ok = (dev_id == "") or (not is_zero_device_id(dev_id))
+    checks.append(_check("identity:device-id", id_ok, dev_id or "derived from MAC (not pinned)"))
 
     cards = parse_alsa_cards(runner("aplay"))
     m = re.search(r'output_device\s*=\s*"hw:CARD=([^,"]+)', conf)

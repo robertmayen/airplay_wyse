@@ -111,6 +111,12 @@
   changed_when: false
   failed_when: airplay_nqptp_version.rc != 0
 
+- name: Ensure stamp directory exists
+  ansible.builtin.file:
+    path: /usr/local/share/airplay
+    state: directory
+    mode: "0755"
+
 - name: Write build stamp
   ansible.builtin.copy:
     dest: /usr/local/share/airplay/.versions

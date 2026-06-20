@@ -31,6 +31,13 @@ dist/
 # Ansible
 *.retry
 
+# Local fleet inventory + secrets (never commit real hosts/creds)
+inventory/*.local.yml
+inventory/host_vars/*.local.yml
+inventory/secrets.yml
+.vault-pass
+*.vault
+
 # Misc
 coverage/
 /.tags
