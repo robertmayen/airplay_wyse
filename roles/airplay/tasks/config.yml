@@ -1,0 +1,7 @@
+---
+- name: Render shairport-sync.conf
+  ansible.builtin.template:
+    src: shairport-sync.conf.j2
+    dest: /etc/shairport-sync.conf
+    mode: "0644"
+  notify: Restart shairport-sync

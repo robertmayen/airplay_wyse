@@ -1,0 +1,48 @@
+---
+- name: Ensure shairport-sync override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/shairport-sync.service.d
+    state: directory
+    mode: "0755"
+
+- name: Install hardening override
+  ansible.builtin.template:
+    src: shairport-override.conf.j2
+    dest: /etc/systemd/system/shairport-sync.service.d/10-airplay.conf
+    mode: "0644"
+  notify:
+    - Daemon reload
+    - Restart shairport-sync
+
+- name: Enable and start nqptp
+  ansible.builtin.systemd:
+    name: nqptp
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Enable and start shairport-sync
+  ansible.builtin.systemd:
+    name: shairport-sync
+    enabled: true
+    state: started
+
+- name: Install health timer (optional)
+  when: airplay_health_timer | bool
+  block:
+    - name: Install health service unit
+      ansible.builtin.template:
+        src: airplay-health.service.j2
+        dest: /etc/systemd/system/airplay-health.service
+        mode: "0644"
+    - name: Install health timer unit
+      ansible.builtin.template:
+        src: airplay-health.timer.j2
+        dest: /etc/systemd/system/airplay-health.timer
+        mode: "0644"
+    - name: Enable health timer
+      ansible.builtin.systemd:
+        name: airplay-health.timer
+        enabled: true
+        state: started
+        daemon_reload: true

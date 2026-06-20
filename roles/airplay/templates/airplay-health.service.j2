@@ -1,0 +1,6 @@
+[Unit]
+Description=AirPlay Wyse health check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/airplay-doctor --check
