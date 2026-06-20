@@ -76,3 +76,54 @@ def test_device_id_parse_and_zero():
     assert ad.is_zero_device_id("00:00:00:00:00:00") is True
     assert ad.is_zero_device_id("5C:AA:FD:11:22:33") is False
     assert ad.is_zero_device_id("") is True
+
+
+def _fixture_runner(overrides=None):
+    base = {
+        "is_active:shairport-sync": "active",
+        "is_active:nqptp": "active",
+        "is_active:avahi-daemon": "active",
+        "shairport_version": "4.3.7-OpenSSL-ALSA-soxr-AirPlay2",
+        "ss": 'UNCONN 0 0 0.0.0.0:319 0.0.0.0:* users:(("nqptp",pid=1,fd=4))\n'
+              'UNCONN 0 0 0.0.0.0:320 0.0.0.0:* users:(("nqptp",pid=1,fd=5))\n',
+        "mdns": "+ eth0 IPv4 X _airplay._tcp local\n+ eth0 IPv4 X _raop._tcp local\n",
+        "aplay": "hw:CARD=Device,DEV=0\n",
+        "journal": "all good\n",
+        "config": 'airplay_device_id = "5C:AA:FD:11:22:33";\n'
+                  'output_device = "hw:CARD=Device,DEV=0";\n',
+    }
+    if overrides:
+        base.update(overrides)
+    return lambda name: base.get(name, "")
+
+
+def test_report_all_green():
+    r = ad.build_report(_fixture_runner())
+    assert r["ok"] is True
+    assert r["device_id"] == "5C:AA:FD:11:22:33"
+    assert r["mdns"]["airplay"] is True
+
+
+def test_report_fails_when_nqptp_down():
+    r = ad.build_report(_fixture_runner({"is_active:nqptp": "inactive"}))
+    assert r["ok"] is False
+    assert any(c["name"] == "service:nqptp" and not c["ok"] for c in r["checks"])
+
+
+def test_report_fails_on_missing_airplay2_feature():
+    r = ad.build_report(_fixture_runner({"shairport_version": "4.3.7-OpenSSL-ALSA"}))
+    assert r["ok"] is False
+    assert any(c["name"] == "feature:airplay2" and not c["ok"] for c in r["checks"])
+
+
+def test_report_fails_on_zero_device_id():
+    r = ad.build_report(_fixture_runner({"config": 'airplay_device_id = "00:00:00:00:00:00";'}))
+    assert r["ok"] is False
+
+
+def test_main_json_exit_code(capsys):
+    rc = ad.main(["--json"], runner=_fixture_runner())
+    out = capsys.readouterr().out
+    import json
+    assert json.loads(out)["ok"] is True
+    assert rc == 0
