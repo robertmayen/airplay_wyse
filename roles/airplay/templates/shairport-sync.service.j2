@@ -3,8 +3,11 @@ Description=Shairport Sync ({{ airplay_name }}) - AirPlay 2 Audio Receiver
 # Managed by airplay_wyse Ansible. Hardening + ordering live in 10-airplay.conf.
 After=network-online.target avahi-daemon.service sound.target alsa-restore.service local-fs.target systemd-udev-settle.service
 Wants=network-online.target avahi-daemon.service
-StartLimitIntervalSec=120
-StartLimitBurst=5
+# Cold-start tolerance: a USB DAC can take several seconds to enumerate after
+# boot, and shairport-sync exits immediately (output_device_error / ENODEV) if
+# its raw hw: device is not yet present. Disable the start rate-limiter so the
+# unit keeps retrying until the DAC appears, instead of giving up.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -15,7 +18,7 @@ RuntimeDirectory=shairport-sync
 RuntimeDirectoryMode=0755
 ExecStart=/usr/local/bin/shairport-sync -c /etc/shairport-sync.conf
 Restart=on-failure
-RestartSec=3
+RestartSec=5
 TimeoutStartSec=90
 TimeoutStopSec=10
 
