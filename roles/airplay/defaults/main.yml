@@ -1,0 +1,45 @@
+---
+shairport_major: "4"
+shairport_sync_version: "4.3.7"
+nqptp_version: "1.2.8"
+alac_ref: "master"
+
+_shairport_flags:
+  "4": >-
+    --sysconfdir=/etc --with-alsa --with-soxr --with-avahi --with-ssl=openssl
+    --with-systemd --with-airplay-2 --with-apple-alac
+  "5": >-
+    --sysconfdir=/etc --with-alsa --with-soxr --with-avahi --with-ssl=openssl
+    --with-systemd-startup --with-airplay-2
+shairport_configure_flags: "{{ _shairport_flags[shairport_major] }}"
+
+# Required runtime features (token-tolerant match against `shairport-sync -V`).
+# ALAC is required only for the major-4 (apple-alac) profile.
+airplay_required_features: "{{ ['AirPlay 2', 'soxr', 'ALAC'] if shairport_major == '4' else ['AirPlay 2', 'soxr'] }}"
+
+airplay_build_root: /usr/local/src/airplay
+airplay_state_dir: shairport-sync
+airplay_health_timer: false
+
+airplay_build_deps:
+  - build-essential
+  - git
+  - autoconf
+  - automake
+  - libtool
+  - libpopt-dev
+  - libconfig-dev
+  - libasound2-dev
+  - avahi-daemon
+  - libavahi-client-dev
+  - libssl-dev
+  - libsoxr-dev
+  - libplist-dev
+  - libsodium-dev
+  - libavutil-dev
+  - libavcodec-dev
+  - libavformat-dev
+  - uuid-dev
+  - libgcrypt20-dev
+  - xxd
+  - systemd-dev

@@ -1,0 +1,9 @@
+---
+airplay_name: "Living Room"
+# ALSA card name from `aplay -L` (the CARD= token of your USB DAC):
+airplay_alsa_card: "Device"
+airplay_alsa_device: 0
+# Optional: pin a stable device-id independent of hardware MAC:
+# airplay_device_id: "5C:AA:FD:11:22:33"
+# Optional: force output rate when the DAC cannot do native 44.1 kHz:
+# airplay_output_rate: 48000
