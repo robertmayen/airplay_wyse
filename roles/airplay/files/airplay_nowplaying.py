@@ -28,6 +28,11 @@ COVER_FILE = os.path.join(STATE_DIR, "cover")
 CORE = 0x636F7265
 SSNC = 0x73736E63
 
+# Upper bound on the read buffer. Cover-art PICT items carry a full JPEG/PNG
+# base64-encoded inside a single <item>, which is routinely several MB, so the
+# cap must sit well above any real cover (a 1 MB guard would drop them mid-stream).
+MAX_BUF = 16 * 1024 * 1024
+
 _ITEM_RE = re.compile(
     rb"<item><type>([0-9a-fA-F]{8})</type><code>([0-9a-fA-F]{8})</code>"
     rb"<length>(\d+)</length>"
@@ -39,6 +44,20 @@ _ITEM_RE = re.compile(
 def code_to_str(code: int) -> str:
     """0x6d696e6d -> 'minm'."""
     return code.to_bytes(4, "big").decode("latin-1")
+
+
+def trim_buffer(buf: bytes, max_bytes: int = MAX_BUF) -> bytes:
+    """Bound buffer growth on a corrupt/garbage stream without discarding a
+    legitimately large partial <item> still arriving (e.g. a multi-MB cover).
+
+    Once the buffer exceeds the cap, drop everything before the last <item>
+    start so a real in-progress item is preserved; if there is no <item> marker
+    at all, the buffer is pure garbage and is dropped entirely.
+    """
+    if len(buf) <= max_bytes:
+        return buf
+    cut = buf.rfind(b"<item>")
+    return buf[cut:] if cut != -1 else b""
 
 
 def parse_items(buf: bytes):
@@ -158,8 +177,7 @@ def run(pipe_path: str = PIPE) -> None:  # pragma: no cover - I/O loop
                         break  # writer (shairport) closed; reopen
                     buf += chunk
                     items, buf = parse_items(buf)
-                    if len(buf) > 1_000_000:  # runaway guard on a partial item
-                        buf = b""
+                    buf = trim_buffer(buf)  # runaway guard, cover-art safe
                     dirty = False
                     for typ, code, payload in items:
                         dirty |= apply_item(state, typ, code, payload)

@@ -64,3 +64,27 @@ def test_apply_item_volume():
     state = np.empty_state()
     assert np.apply_item(state, np.SSNC, 0x70766F6C, b"-15.00,-20.00,-30.00,0.00") is True
     assert state["volume_percent"] == 50
+
+
+def test_trim_buffer_under_cap_unchanged():
+    buf = b"<item><type>" + b"x" * 100
+    assert np.trim_buffer(buf, max_bytes=10_000) is buf
+
+
+def test_trim_buffer_keeps_large_partial_item():
+    # A partial item bigger than the OLD 1 MB guard but under the cap must survive
+    # whole (a multi-MB cover still arriving), not get wiped.
+    partial = b"<item><type>50494354</type>" + b"A" * 2_000_000
+    assert np.trim_buffer(partial, max_bytes=16_000_000) is partial
+
+
+def test_trim_buffer_trims_to_last_item_start():
+    garbage = b"\x00" * 5_000
+    tail = b"<item><type>50494354</type>" + b"B" * 100
+    out = np.trim_buffer(garbage + tail, max_bytes=4_000)
+    assert out == tail  # leading garbage dropped, partial item preserved
+
+
+def test_trim_buffer_drops_oversized_garbage_without_item():
+    garbage = b"\x00" * 5_000  # no <item> marker at all
+    assert np.trim_buffer(garbage, max_bytes=4_000) == b""

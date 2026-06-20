@@ -91,6 +91,29 @@ explicitly in `host_vars/<hostname>.yml` for each box to guarantee uniqueness,
 then re-run `site.yml`. The fleet-wide duplicate check in `doctor.yml` will
 flag any remaining conflicts.
 
+## Dashboard
+
+When `airplay_metadata_enabled` is true the role installs a small web dashboard
+(`airplay-dashboard.service`) showing now-playing, cover art, and service health,
+plus a volume slider and a disconnect button.
+
+**Trust model: the dashboard is unauthenticated.** Its `/api/volume` and
+`/api/disconnect` endpoints drive shairport-sync over D-Bus, so any device that
+can reach the bind address can control playback. There is intentionally no login —
+for a LAN appliance, restricting *reach* is the proportionate control. By default
+it binds all interfaces (`airplay_dashboard_bind: "0.0.0.0"`) so phones on the LAN
+can view it. To lock it down, set per host in `host_vars/<hostname>.yml`:
+
+```yaml
+airplay_dashboard_bind: "127.0.0.1"   # box-local only
+# or a specific LAN IP to limit which interface it answers on
+airplay_dashboard_port: 8080
+```
+
+The `airplay-dashboard` and `airplay-nowplaying` units run as the unprivileged
+`shairport-sync` user under the same systemd sandbox as shairport-sync
+(`NoNewPrivileges`, `ProtectSystem=strict`, restricted address families, etc.).
+
 ## Systemd
 
 Standard systemd commands apply — the role does not install any custom wrappers:

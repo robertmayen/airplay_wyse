@@ -29,6 +29,11 @@ airplay_metadata_enabled: false
 # Pipe must live outside /tmp because the hardened unit sets PrivateTmp=yes.
 airplay_metadata_pipe: /run/shairport-sync/metadata-pipe
 airplay_dashboard_port: 8080
+# Address the dashboard binds to. It is an UNAUTHENTICATED control surface
+# (volume + disconnect over D-Bus), so anything that can reach this address can
+# control playback. Default is all interfaces for LAN access from phones; set to
+# a specific LAN IP or "127.0.0.1" per-host to restrict reach.
+airplay_dashboard_bind: "0.0.0.0"
 
 # Dedicated system user shairport-sync runs as.
 airplay_service_user: shairport-sync

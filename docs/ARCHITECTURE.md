@@ -101,6 +101,11 @@ cloned images.
 - No periodic timers that write to `/etc`.
 - nqptp runs unprivileged with a capability ambient set.
 - shairport-sync runs as its vendor user under the hardened drop-in.
+- The optional `airplay-dashboard` and `airplay-nowplaying` services run as the
+  same unprivileged user under an equivalent systemd sandbox (`NoNewPrivileges`,
+  `ProtectSystem=strict`, restricted address families, `@system-service` syscall
+  filter). The dashboard is an **unauthenticated** control surface — reach is
+  restricted via `airplay_dashboard_bind`, not a login. See OPERATIONS.md.
 - Avahi must be active to advertise `_airplay._tcp`.
 
 ## Dependencies

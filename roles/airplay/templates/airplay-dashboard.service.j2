@@ -9,9 +9,21 @@ Type=simple
 User={{ airplay_service_user }}
 Group={{ airplay_service_user }}
 Environment="AIRPLAY_NAME={{ airplay_name }}"
+Environment=AIRPLAY_DASHBOARD_BIND={{ airplay_dashboard_bind }}
 Environment=AIRPLAY_DASHBOARD_PORT={{ airplay_dashboard_port }}
 Environment=AIRPLAY_STATE_DIR=/run/airplay
 ExecStart=/usr/local/bin/airplay-dashboard
+# Sandbox: this is a network-facing, unauthenticated control surface.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+# AF_INET/AF_INET6 for the HTTP listener; AF_UNIX for the busctl D-Bus socket.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
 Restart=on-failure
 RestartSec=3
 

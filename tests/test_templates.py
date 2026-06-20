@@ -105,6 +105,29 @@ def test_config_no_metadata_block_by_default():
     assert "dbus_service_bus" not in out
 
 
+def test_dashboard_unit_has_bind_env_and_hardening():
+    out = render("airplay-dashboard.service.j2", airplay_name="Living Room",
+                 airplay_service_user="shairport-sync",
+                 airplay_dashboard_bind="127.0.0.1", airplay_dashboard_port=8080)
+    assert "Environment=AIRPLAY_DASHBOARD_BIND=127.0.0.1" in out
+    assert "NoNewPrivileges=yes" in out
+    assert "ProtectSystem=strict" in out
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in out
+    assert "SystemCallFilter=@system-service" in out
+    assert "User=shairport-sync" in out
+
+
+def test_nowplaying_unit_is_hardened_and_networkless():
+    out = render("airplay-nowplaying.service.j2", airplay_name="Living Room",
+                 airplay_service_user="shairport-sync",
+                 airplay_metadata_pipe="/run/shairport-sync/metadata-pipe")
+    assert "NoNewPrivileges=yes" in out
+    assert "ProtectSystem=strict" in out
+    assert "RestrictAddressFamilies=AF_UNIX" in out
+    assert "AF_INET" not in out  # no networking for the metadata reader
+    assert "RuntimeDirectory=airplay" in out
+
+
 def test_nqptp_override_grants_bind_capability():
     out = render("nqptp-override.conf.j2")
     assert "AmbientCapabilities=CAP_NET_BIND_SERVICE" in out

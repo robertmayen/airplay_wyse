@@ -15,12 +15,13 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NAME = os.environ.get("AIRPLAY_NAME", os.uname().nodename)
+BIND = os.environ.get("AIRPLAY_DASHBOARD_BIND", "0.0.0.0")
 PORT = int(os.environ.get("AIRPLAY_DASHBOARD_PORT", "8080"))
 STATE_DIR = os.environ.get("AIRPLAY_STATE_DIR", "/run/airplay")
 STATE_FILE = os.path.join(STATE_DIR, "nowplaying.json")
 
-DBUS = ["busctl", "--system", "call", "org.gnome.ShairportSync",
-        "/org/gnome/ShairportSync", "org.gnome.ShairportSync"]
+_BUS = ["busctl", "--system", "call", "org.gnome.ShairportSync", "/org/gnome/ShairportSync"]
+SVC_IFACE = "org.gnome.ShairportSync"
 
 
 def percent_to_db(percent: int) -> float:
@@ -31,6 +32,21 @@ def percent_to_db(percent: int) -> float:
     return round(-30.0 + percent * 0.30, 2)
 
 
+def volume_cmd(percent: int) -> list:
+    """busctl argv to set the AirPlay volume.
+
+    SetAirplayVolume lives on the RemoteControl interface (not the main one),
+    and the '--' is required so busctl does not parse the negative dB value as
+    options. Both were wrong before and the control silently did nothing.
+    """
+    return _BUS + [SVC_IFACE + ".RemoteControl", "SetAirplayVolume", "d", "--",
+                   str(percent_to_db(percent))]
+
+
+def disconnect_cmd() -> list:
+    return _BUS + [SVC_IFACE, "DropSession"]
+
+
 def _run(cmd) -> bool:
     try:
         return subprocess.run(cmd, capture_output=True, timeout=5).returncode == 0
@@ -39,12 +55,11 @@ def _run(cmd) -> bool:
 
 
 def set_volume(percent: int) -> bool:
-    db = percent_to_db(percent)
-    return _run(DBUS + ["RemoteControl", "SetAirplayVolume", "d", str(db)])
+    return _run(volume_cmd(percent))
 
 
 def disconnect() -> bool:
-    return _run(DBUS + ["DropSession"])
+    return _run(disconnect_cmd())
 
 
 def service_active(name: str) -> bool:
@@ -175,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():  # pragma: no cover - server loop
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((BIND, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":  # pragma: no cover
