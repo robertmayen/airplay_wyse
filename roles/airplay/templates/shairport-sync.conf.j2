@@ -8,7 +8,7 @@ general = {
 };
 
 sessioncontrol = {
-  session_timeout = 20;
+  session_timeout = {{ airplay_session_timeout | default(60) }};
 };
 
 alsa = {

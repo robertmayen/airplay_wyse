@@ -43,6 +43,7 @@ airplay_build_deps:
   - libssl-dev
   - libsoxr-dev
   - libplist-dev
+  - libplist-utils
   - libsodium-dev
   - libavutil-dev
   - libavcodec-dev
