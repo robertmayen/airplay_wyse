@@ -1,0 +1,18 @@
+[Service]
+# Managed by airplay_wyse Ansible.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+StateDirectory={{ airplay_state_dir }}
+CacheDirectory={{ airplay_state_dir }}
+DeviceAllow=char-alsa rw
+DevicePolicy=closed
+Requires=nqptp.service
+After=nqptp.service avahi-daemon.service
+Restart=on-failure
