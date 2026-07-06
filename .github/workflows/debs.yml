@@ -67,9 +67,15 @@ jobs:
           ansible-galaxy collection install 'community.docker:>=3.13.0'
       - name: Load ALSA loopback on runner
         run: |
+          set -x
+          uname -r
           sudo apt-get update
-          sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+          # Azure kernels: the versioned modules-extra package can rotate out
+          # of the index between runner-image rebuilds; the meta package tracks.
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)" \
+            || sudo apt-get install -y linux-modules-extra-azure
           sudo modprobe snd-aloop
+          cat /proc/asound/cards
       - name: Start systemd container
         run: |
           docker build -t airplay-wyse-ci ci/
