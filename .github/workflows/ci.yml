@@ -22,3 +22,46 @@ jobs:
         run: ansible-playbook --syntax-check site.yml migration.yml doctor.yml
       - name: pytest
         run: pytest -v
+
+  converge:
+    runs-on: ubuntu-24.04  # pinned: systemd-in-docker/cgroup behavior
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ansible + docker connection plugin
+        run: |
+          pip install -r requirements-dev.txt
+          ansible-galaxy collection install 'community.docker:>=3.13.0'
+      - name: Load ALSA loopback on runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+          sudo modprobe snd-aloop
+      - name: Build systemd container image
+        run: docker build -t airplay-wyse-ci ci/
+      - name: Start container
+        run: |
+          docker run -d --name wyse-ci --privileged --cgroupns=host \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            --tmpfs /run --tmpfs /run/lock airplay-wyse-ci
+          timeout 60 docker exec wyse-ci bash -c \
+            'until systemctl is-system-running --wait 2>/dev/null; do sleep 2; done; true'
+      - name: "Converge (run 1: build from source)"
+        run: ansible-playbook -i ci/inventory.yml site.yml
+      - name: "Idempotence (run 2: must report changed=0)"
+        run: |
+          ansible-playbook -i ci/inventory.yml site.yml --diff | tee /tmp/run2.log
+          grep -E 'wyse-ci\s*:\s*ok=[0-9]+\s+changed=0\s+unreachable=0\s+failed=0' /tmp/run2.log \
+            || { echo "::error::Second run not idempotent"; exit 1; }
+      - name: Verify services actually running
+        run: |
+          docker exec wyse-ci systemctl is-active nqptp shairport-sync
+          docker exec wyse-ci shairport-sync -V
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker exec wyse-ci journalctl -u shairport-sync -u nqptp -u avahi-daemon --no-pager -n 200 || true
+          docker exec wyse-ci systemctl --failed --no-pager || true

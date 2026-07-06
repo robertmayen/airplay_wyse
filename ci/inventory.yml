@@ -1,0 +1,15 @@
+---
+all:
+  children:
+    airplay:
+      hosts:
+        wyse-ci:
+          ansible_connection: community.docker.docker
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+          # ansible.cfg sets become=True globally; the container has no sudo
+          # and we're already root — connection vars outrank play keywords.
+          ansible_become: false
+          airplay_name: "CI Test Box"
+          airplay_alsa_card: "Loopback"  # snd-aloop on the runner, via --privileged
+          airplay_alsa_device: 0

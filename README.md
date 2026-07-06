@@ -198,3 +198,9 @@ make lint    # yamllint + ansible-lint
 make test    # pytest (airplay-doctor parser tests)
 make check   # lint + test + syntax-check all playbooks
 ```
+
+CI additionally converges the full role **twice** inside a Debian 13 systemd
+container (with a real ALSA loopback card) and fails if the second run reports
+any changed task — the role's idempotence claim is a regression test, not an
+assertion. Audio, sync, and pairing still require physical hardware (see the
+rollout runbook).
