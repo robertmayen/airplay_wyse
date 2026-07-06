@@ -141,3 +141,26 @@ def test_main_json_exit_code(capsys):
     import json
     assert json.loads(out)["ok"] is True
     assert rc == 0
+
+
+def test_parse_output_device():
+    conf = 'output_device = "hw:CARD=Device,DEV=0";\n'
+    assert ad.parse_output_device(conf) == "hw:CARD=Device,DEV=0"
+    assert ad.parse_output_device("") == ""
+
+
+def test_deep_probe_pass_and_fail():
+    ok_out = "HW Params of device \"hw:CARD=Device,DEV=0\":\nACCESS: MMAP_INTERLEAVED\n"
+    r = ad.build_report(_fixture_runner(
+        {"deep_open:hw:CARD=Device,DEV=0": ok_out}), deep=True)
+    assert any(c["name"] == "deep:device-open" and c["ok"] for c in r["checks"])
+
+    r = ad.build_report(_fixture_runner(
+        {"deep_open:hw:CARD=Device,DEV=0": "aplay: main:834: audio open error: Device or resource busy\n"}), deep=True)
+    assert r["ok"] is False
+    assert any(c["name"] == "deep:device-open" and not c["ok"] for c in r["checks"])
+
+
+def test_no_deep_check_without_flag():
+    r = ad.build_report(_fixture_runner())
+    assert not any(c["name"].startswith("deep:") for c in r["checks"])

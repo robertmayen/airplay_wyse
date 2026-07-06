@@ -60,6 +60,11 @@ def parse_journal_errors(journal_text: str) -> dict:
     return counts
 
 
+def parse_output_device(conf_text: str) -> str:
+    m = re.search(r'output_device\s*=\s*"([^"]+)"', conf_text)
+    return m.group(1) if m else ""
+
+
 def parse_device_id(conf_text: str) -> str:
     m = re.search(r'airplay_device_id\s*=\s*"?([0-9A-Fa-fx:]+)"?', conf_text)
     return m.group(1) if m else ""
@@ -94,6 +99,16 @@ def _system_runner(name: str) -> str:
     if name.startswith("is_active:"):
         svc = name.split(":", 1)[1]
         return _capture(["systemctl", "is-active", svc])
+    if name.startswith("deep_open:"):
+        dev = name.split(":", 1)[1]
+        # aplay prints hw params to stderr; merge so the token check sees them.
+        try:
+            r = subprocess.run(
+                ["aplay", "-D", dev, "--dump-hw-params", "-d", "1", "/dev/zero"],
+                capture_output=True, text=True, check=False, timeout=10)
+            return r.stdout + r.stderr
+        except (OSError, subprocess.SubprocessError):
+            return ""
     if name == "config":
         try:
             with open("/etc/shairport-sync.conf", encoding="utf-8") as fh:
@@ -150,8 +165,14 @@ def build_report(runner, deep: bool = False) -> dict:
     checks.append(_check("journal:errors", errs["xruns"] == 0 and errs["sync"] == 0, str(errs)))
 
     if deep:
-        # opt-in only; opening hw: can disrupt shairport's exclusive access
-        checks.append(_check("deep:device-open", True, "deep probe placeholder"))
+        # Opt-in only: opening hw: can disrupt shairport's exclusive access.
+        dev = parse_output_device(conf)
+        if dev:
+            out = runner(f"deep_open:{dev}")
+            opened = "HW Params of device" in out
+            checks.append(_check("deep:device-open", opened, dev))
+        else:
+            checks.append(_check("deep:device-open", False, "no output_device in config"))
 
     return {
         "host": socket.gethostname(),

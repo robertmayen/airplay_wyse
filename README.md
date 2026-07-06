@@ -164,7 +164,9 @@ sync, and audio stability before rolling out.
 ansible-playbook doctor.yml
 # or on the box:
 airplay-doctor --check
-airplay-doctor --deep --json   # extended probe (opens ALSA device)
+airplay-doctor --deep --json   # extended probe: opens the configured ALSA device
+                               # via `aplay --dump-hw-params` (1s of silence; may
+                               # briefly contend with an active stream)
 ```
 
 ## Repository Layout

@@ -57,7 +57,9 @@ A small Python tool installed to `/usr/local/bin/airplay-doctor` on each box
 by the role. It performs non-invasive checks (service state, listening ports,
 mDNS advertisement, ALSA card presence, journal errors, device-id uniqueness)
 and reports via human-readable or `--json` output. `--deep` adds an optional
-ALSA device-open probe. The tool is designed to exit 0 when healthy and non-zero
+ALSA device-open probe: it opens the configured `output_device` with
+`aplay --dump-hw-params` (playing 1s of silence from `/dev/zero`), so it can
+briefly contend with an active AirPlay stream — hence opt-in. The tool is designed to exit 0 when healthy and non-zero
 when any check fails, making it suitable for use in scripts and CI.
 
 ## systemd Units
