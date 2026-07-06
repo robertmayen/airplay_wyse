@@ -21,7 +21,7 @@
 - name: Compute desired build signature
   ansible.builtin.set_fact:
     airplay_build_signature: >-
-      shairport={{ shairport_sync_version }}|nqptp={{ nqptp_version }}|
+      shairport={{ shairport_sync_version }}@{{ shairport_sync_commit }}|nqptp={{ nqptp_version }}@{{ nqptp_commit }}|
       alac={{ alac_ref }}|flags={{ shairport_configure_flags }}
     airplay_stamp_current: "{{ (airplay_stamp_raw.content | b64decode | from_json) if airplay_stamp_raw.content is defined else {} }}"
 
@@ -56,7 +56,7 @@
       ansible.builtin.git:
         repo: https://github.com/mikebrady/nqptp
         dest: "{{ airplay_build_root }}/nqptp"
-        version: "{{ nqptp_version }}"
+        version: "{{ nqptp_commit }}"
         force: true
     - name: Build nqptp
       ansible.builtin.shell: |
@@ -76,7 +76,7 @@
       ansible.builtin.git:
         repo: https://github.com/mikebrady/shairport-sync
         dest: "{{ airplay_build_root }}/shairport-sync"
-        version: "{{ shairport_sync_version }}"
+        version: "{{ shairport_sync_commit }}"
         force: true
     - name: Build shairport-sync
       ansible.builtin.shell: |

@@ -1,8 +1,10 @@
 ---
 shairport_major: "4"
 shairport_sync_version: "4.3.7"
+shairport_sync_commit: "0b1c4391ffd398e7b145eb4b98416261380adeea"   # tag 4.3.7 — checkout truth (tags are mutable)
 nqptp_version: "1.2.8"
-alac_ref: "master"
+nqptp_commit: "c925f27c1fd12e4033ac477e5a405969b0b0260b"            # tag 1.2.8
+alac_ref: "5d8c5db0dfcadd5872f28e665cf4f4303447352a"                # was floating "master"
 
 _shairport_flags:
   "4": >-

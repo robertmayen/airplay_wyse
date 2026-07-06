@@ -139,7 +139,10 @@ fix any duplicates by setting `airplay_device_id` in the relevant `host_vars/`.
 
 ### Updating shairport-sync version
 
-1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in `inventory/group_vars/airplay.yml`.
+1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in `inventory/group_vars/airplay.yml`,
+   and refresh the matching `shairport_sync_commit`/`nqptp_commit` SHAs
+   (`git ls-remote https://github.com/mikebrady/<repo> <tag>`) — checkouts are
+   pinned to commits, not tags. The weekly version-bump PR does this for you.
 2. Re-run `site.yml` against the spare box first (step 3 above).
 3. Roll to the fleet once the spare-box matrix is green.
 
