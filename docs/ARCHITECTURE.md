@@ -12,12 +12,23 @@ machine.
 
 ### shairport-sync
 
-Built from source at a pinned version (`shairport_sync_version` in
-`inventory/group_vars/airplay.yml`) with an explicit feature flag set
-(`airplay_required_features`). The build is stamped and re-run only when the
-stamp file does not exist or the version pin changes. After building, the role
-verifies that the installed binary advertises every required feature before
-proceeding.
+Installed one of two ways, selected by `airplay_install_method`:
+
+- **`source`** (default): built on the box at a pinned version and commit SHA
+  (`shairport_sync_version`/`shairport_sync_commit`) with an explicit feature
+  flag set (`airplay_required_features`). The build is stamped and re-run only
+  when the stamp file does not exist or a pin/flag changes.
+- **`deb`**: CI-built packages from the GitHub Release tagged
+  `debs-shairport<ver>-nqptp<ver>-r<rev>` (built by
+  `.github/workflows/debs.yml` in a Debian 13 container, Depends resolved with
+  `dpkg-shlibdeps`, prefix `/usr/local`). The control machine downloads the
+  assets with `gh release download`, verifies checksums, pushes them to each
+  box, and installs with apt. The shairport deb bakes in metadata+dbus support
+  (runtime-inert unless the config enables it) so one package serves both
+  dashboard profiles.
+
+Either way, the role verifies that the installed binary advertises every
+required feature before proceeding.
 
 ### nqptp
 
@@ -51,13 +62,33 @@ roles/airplay/
 | `migration.yml` | One-time cleanup of the legacy Python/shell stack: removes `/var/lib/airplay_wyse/`, `/usr/local/libexec/airplay_wyse/`, and legacy systemd units |
 | `doctor.yml` | Non-invasive fleet health check: runs `airplay-doctor --check` on every host and checks for duplicate AirPlay device IDs across the fleet |
 
+### CI / release pipeline
+
+```
+version-bump.yml (weekly) ──PR──▶ ci.yml (lint + container converge ×2,
+                                   idempotence gate)          │ merge
+                                                              ▼
+                     debs.yml (build .debs → converge smoke → GitHub Release
+                               debs-shairport<v>-nqptp<v>-r<rev>)
+                                                              │
+                     fleet rollout: site.yml -e airplay_install_method=deb
+```
+
+The converge job runs in a privileged Debian 13 systemd container. Runners
+have no sound hardware (azure kernels ship no snd modules), so CI sets
+`airplay_alsa_disable_standby: "never"` — shairport starts and stays up
+without opening the (phantom) device. Device-open, audio, sync, and pairing
+still require physical hardware (spare-box matrix).
+
 ### airplay-doctor
 
 A small Python tool installed to `/usr/local/bin/airplay-doctor` on each box
 by the role. It performs non-invasive checks (service state, listening ports,
 mDNS advertisement, ALSA card presence, journal errors, device-id uniqueness)
 and reports via human-readable or `--json` output. `--deep` adds an optional
-ALSA device-open probe. The tool is designed to exit 0 when healthy and non-zero
+ALSA device-open probe: it opens the configured `output_device` with
+`aplay --dump-hw-params` (playing 1s of silence from `/dev/zero`), so it can
+briefly contend with an active AirPlay stream — hence opt-in. The tool is designed to exit 0 when healthy and non-zero
 when any check fails, making it suitable for use in scripts and CI.
 
 ## systemd Units
@@ -87,6 +118,12 @@ There are **no** boot-time oneshot services for identity, ALSA policy, or
 PipeWire policy. Configuration is applied at provision time by Ansible and
 does not change between runs unless the role is re-applied.
 
+The health timer (`airplay-health.timer`, on by default, every 30 min) runs
+`airplay-doctor --json` and publishes the report atomically to
+`/run/airplay-doctor.json` — tmpfs only, never `/etc`. The dashboard renders
+it as a health badge; the oneshot unit itself goes red (`systemctl --failed`)
+when the doctor reports unhealthy.
+
 ## Identity and Configuration
 
 `airplay_name` and `airplay_alsa_card` are set per-host in `host_vars/`. The
@@ -105,7 +142,8 @@ cloned images.
   same unprivileged user under an equivalent systemd sandbox (`NoNewPrivileges`,
   `ProtectSystem=strict`, restricted address families, `@system-service` syscall
   filter). The dashboard is an **unauthenticated** control surface — reach is
-  restricted via `airplay_dashboard_bind`, not a login. See OPERATIONS.md.
+  restricted via `airplay_dashboard_bind`, not a login. It binds loopback only
+  by default; LAN access is an explicit opt-in. See OPERATIONS.md.
 - Avahi must be active to advertise `_airplay._tcp`.
 
 ## Dependencies

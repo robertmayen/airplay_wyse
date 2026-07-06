@@ -1,6 +1,18 @@
 ---
 - name: Build stack from source
   ansible.builtin.import_tasks: build.yml
+  when: airplay_install_method == "source"
+
+- name: Install stack from CI-built debs
+  ansible.builtin.import_tasks: install_deb.yml
+  when: airplay_install_method == "deb"
+
+- name: Verify required features
+  ansible.builtin.import_tasks: verify.yml
+
+- name: Record source-build stamp
+  ansible.builtin.import_tasks: stamp.yml
+  when: airplay_install_method == "source"
 
 - name: Render configuration
   ansible.builtin.import_tasks: config.yml

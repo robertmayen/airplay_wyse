@@ -62,6 +62,18 @@ airplay-doctor --json             # machine-readable output
 airplay-doctor --deep             # adds ALSA device-open probe (optional)
 ```
 
+### Continuous (health timer + dashboard badge)
+
+`airplay-health.timer` (on by default) runs the doctor every 30 minutes and
+writes the JSON report to `/run/airplay-doctor.json`. The dashboard shows it
+as a `doctor` badge: green = all checks pass, red = hover for the failing
+check names, `doctor —` = no report yet (timer disabled or not yet fired).
+
+```bash
+systemctl status airplay-health   # last run + exit state (red when unhealthy)
+systemctl start airplay-health    # force a fresh report now
+```
+
 ## Updating shairport-sync
 
 1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in
@@ -101,14 +113,18 @@ plus a volume slider and a disconnect button.
 `/api/disconnect` endpoints drive shairport-sync over D-Bus, so any device that
 can reach the bind address can control playback. There is intentionally no login —
 for a LAN appliance, restricting *reach* is the proportionate control. By default
-it binds all interfaces (`airplay_dashboard_bind: "0.0.0.0"`) so phones on the LAN
-can view it. To lock it down, set per host in `host_vars/<hostname>.yml`:
+it binds loopback only (`airplay_dashboard_bind: "127.0.0.1"`); LAN access from
+phones is an explicit opt-in. Set in `inventory/group_vars/airplay.yml` (or per
+host in `host_vars/<hostname>.yml`):
 
 ```yaml
-airplay_dashboard_bind: "127.0.0.1"   # box-local only
+airplay_dashboard_bind: "0.0.0.0"     # reachable from the LAN (phones)
 # or a specific LAN IP to limit which interface it answers on
 airplay_dashboard_port: 8080
 ```
+
+**Migration note:** deployments that used the dashboard from phones before this
+default changed must now set `airplay_dashboard_bind` explicitly as above.
 
 The `airplay-dashboard` and `airplay-nowplaying` units run as the unprivileged
 `shairport-sync` user under the same systemd sandbox as shairport-sync

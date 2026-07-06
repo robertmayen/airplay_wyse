@@ -65,7 +65,9 @@ Compare the reported shairport version against `shairport_sync_version` in
 
 ### 2. Build / syntax smoke — VM or container (optional)
 
-Verify the playbook parses and the from-source build completes:
+CI already does this automatically: every push converges the role twice in a
+Debian 13 systemd container and gates on idempotence. Run it manually only if
+you want a local smoke first:
 
 ```bash
 ansible-playbook --syntax-check site.yml migration.yml doctor.yml
@@ -139,9 +141,54 @@ fix any duplicates by setting `airplay_device_id` in the relevant `host_vars/`.
 
 ### Updating shairport-sync version
 
-1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in `inventory/group_vars/airplay.yml`.
+1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in `inventory/group_vars/airplay.yml`,
+   and refresh the matching `shairport_sync_commit`/`nqptp_commit` SHAs
+   (`git ls-remote https://github.com/mikebrady/<repo> <tag>`) — checkouts are
+   pinned to commits, not tags. The weekly version-bump PR does this for you.
 2. Re-run `site.yml` against the spare box first (step 3 above).
 3. Roll to the fleet once the spare-box matrix is green.
+
+### Fast rollout via debs (build once in CI)
+
+Every change to the version pins triggers the `debs` GitHub Actions workflow,
+which compiles shairport-sync/nqptp/libalac once for Debian 13 amd64,
+smoke-tests them, and publishes a GitHub Release tagged
+`debs-shairport<ver>-nqptp<ver>-r<rev>`. To roll the fleet from those
+artifacts instead of compiling on every box:
+
+```bash
+# prerequisite: gh CLI authenticated on the control machine (gh auth login)
+ansible-playbook site.yml -e airplay_install_method=deb
+```
+
+The control machine downloads the release assets (private repos work — boxes
+never need tokens), verifies `SHA256SUMS`, pushes the debs to each box, and
+installs them with apt. Boxes no longer need `build-essential` for this path
+(existing toolchains are left in place, not purged). Set
+`airplay_install_method: deb` in `inventory/group_vars/airplay.yml` to make it
+the fleet default, or pass a pre-downloaded directory with
+`-e airplay_deb_dir=/path/to/debs` for air-gapped runs.
+
+### Automated version-bump PRs
+
+A weekly workflow (`.github/workflows/version-bump.yml`) checks the latest
+`mikebrady/shairport-sync` and `mikebrady/nqptp` releases and opens/updates a
+PR bumping the version pins **and** their commit SHAs. It never bumps
+shairport-sync across `shairport_major` — that changes the configure-flag
+profile, so it is surfaced as a notice in the PR body for a human call.
+
+One-time setup (without this the bot PR shows **zero CI checks** — PRs created
+with the default `GITHUB_TOKEN` do not trigger other workflows):
+
+1. Create a fine-grained PAT scoped to this repo with **Contents: RW** and
+   **Pull requests: RW**; store it as the `VERSION_BUMP_TOKEN` repo secret.
+   Note the PAT's expiry date as a maintenance item.
+2. Enable *Settings → Actions → General → Allow GitHub Actions to create and
+   approve pull requests*.
+
+Merging the bump PR touches `roles/airplay/defaults/main.yml`, which triggers
+the `debs` workflow → new release tag → fleet rollout via
+`-e airplay_install_method=deb`.
 
 ### Drift correction
 
@@ -164,7 +211,9 @@ sync, and audio stability before rolling out.
 ansible-playbook doctor.yml
 # or on the box:
 airplay-doctor --check
-airplay-doctor --deep --json   # extended probe (opens ALSA device)
+airplay-doctor --deep --json   # extended probe: opens the configured ALSA device
+                               # via `aplay --dump-hw-params` (1s of silence; may
+                               # briefly contend with an active stream)
 ```
 
 ## Repository Layout
@@ -174,16 +223,19 @@ airplay_wyse/
 ├── inventory/          # hosts.yml + host_vars/
 ├── inventory/group_vars/  # airplay.yml (version pins, build flags)
 ├── roles/
-│   └── airplay/        # from-source build, config, hardened systemd, doctor
-│       ├── defaults/   # all tunable variables
-│       ├── tasks/      # install → build → configure → units → doctor
+│   └── airplay/        # source or deb install, config, hardened systemd, doctor
+│       ├── defaults/   # all tunable variables (pins + commit SHAs)
+│       ├── tasks/      # build/install_deb → verify → configure → units → doctor
 │       ├── templates/  # shairport-sync.conf.j2, unit overrides
 │       └── handlers/   # daemon-reload + service restart
 ├── site.yml            # full provisioning (converge)
 ├── migration.yml       # one-time cleanup of the old Python/shell stack
 ├── doctor.yml          # non-invasive fleet health + duplicate-id check
+├── ci/                 # CI systemd container, inventory, deb build script
+├── scripts/            # check_upstream.py (version-bump automation)
+├── .github/workflows/  # ci (lint+converge), debs (packages), version-bump
 ├── docs/               # ARCHITECTURE.md, OPERATIONS.md
-└── tests/              # pytest suite for airplay-doctor parsers
+└── tests/              # pytest: doctor/dashboard/nowplaying, templates, bumper
 ```
 
 ## Linting and Testing
@@ -193,3 +245,10 @@ make lint    # yamllint + ansible-lint
 make test    # pytest (airplay-doctor parser tests)
 make check   # lint + test + syntax-check all playbooks
 ```
+
+CI additionally converges the full role **twice** inside a Debian 13 systemd
+container and fails if the second run reports any changed task — the role's
+idempotence claim is a regression test, not an assertion. Runners have no
+sound hardware, so CI runs shairport with `airplay_alsa_disable_standby:
+"never"` (device only opened during playback); device-open, audio, sync, and
+pairing still require physical hardware (see the rollout runbook).

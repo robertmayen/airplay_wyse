@@ -21,7 +21,7 @@
 - name: Compute desired build signature
   ansible.builtin.set_fact:
     airplay_build_signature: >-
-      shairport={{ shairport_sync_version }}|nqptp={{ nqptp_version }}|
+      shairport={{ shairport_sync_version }}@{{ shairport_sync_commit }}|nqptp={{ nqptp_version }}@{{ nqptp_commit }}|
       alac={{ alac_ref }}|flags={{ shairport_configure_flags }}
     airplay_stamp_current: "{{ (airplay_stamp_raw.content | b64decode | from_json) if airplay_stamp_raw.content is defined else {} }}"
 
@@ -56,7 +56,7 @@
       ansible.builtin.git:
         repo: https://github.com/mikebrady/nqptp
         dest: "{{ airplay_build_root }}/nqptp"
-        version: "{{ nqptp_version }}"
+        version: "{{ nqptp_commit }}"
         force: true
     - name: Build nqptp
       ansible.builtin.shell: |
@@ -76,7 +76,7 @@
       ansible.builtin.git:
         repo: https://github.com/mikebrady/shairport-sync
         dest: "{{ airplay_build_root }}/shairport-sync"
-        version: "{{ shairport_sync_version }}"
+        version: "{{ shairport_sync_commit }}"
         force: true
     - name: Build shairport-sync
       ansible.builtin.shell: |
@@ -89,47 +89,3 @@
         chdir: "{{ airplay_build_root }}/shairport-sync"
       changed_when: true
       notify: Restart shairport-sync
-
-# --- Feature verification runs EVERY play, regardless of the stamp ---
-- name: Capture shairport-sync version string
-  ansible.builtin.command: shairport-sync -V
-  register: airplay_sps_version
-  changed_when: false
-
-- name: Assert required shairport features are present (token-tolerant)
-  ansible.builtin.assert:
-    that:
-      - "feature | lower | replace(' ', '') in (airplay_sps_version.stdout | lower | replace(' ', ''))"
-    fail_msg: "shairport-sync is missing required feature: {{ feature }}"
-  loop: "{{ airplay_required_features }}"
-  loop_control:
-    loop_var: feature
-
-- name: Capture nqptp version (uppercase -V)
-  ansible.builtin.command: nqptp -V
-  register: airplay_nqptp_version
-  changed_when: false
-  failed_when: airplay_nqptp_version.rc != 0
-
-- name: Ensure stamp directory exists
-  ansible.builtin.file:
-    path: /usr/local/share/airplay
-    state: directory
-    mode: "0755"
-
-- name: Write build stamp
-  ansible.builtin.copy:
-    dest: /usr/local/share/airplay/.versions
-    mode: "0644"
-    content: |
-      {{
-        {
-          "signature": airplay_build_signature,
-          "shairport_version": shairport_sync_version,
-          "nqptp_version": nqptp_version,
-          "alac_ref": alac_ref,
-          "configure_flags": shairport_configure_flags,
-          "shairport_v_output": airplay_sps_version.stdout,
-          "nqptp_v_output": airplay_nqptp_version.stdout
-        } | to_nice_json
-      }}

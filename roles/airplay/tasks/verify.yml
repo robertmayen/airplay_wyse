@@ -1,0 +1,22 @@
+---
+# Feature verification runs EVERY play, for both install methods,
+# regardless of the source-build stamp.
+- name: Capture shairport-sync version string
+  ansible.builtin.command: shairport-sync -V
+  register: airplay_sps_version
+  changed_when: false
+
+- name: Assert required shairport features are present (token-tolerant)
+  ansible.builtin.assert:
+    that:
+      - "feature | lower | replace(' ', '') in (airplay_sps_version.stdout | lower | replace(' ', ''))"
+    fail_msg: "shairport-sync is missing required feature: {{ feature }}"
+  loop: "{{ airplay_required_features }}"
+  loop_control:
+    loop_var: feature
+
+- name: Capture nqptp version (uppercase -V)
+  ansible.builtin.command: nqptp -V
+  register: airplay_nqptp_version
+  changed_when: false
+  failed_when: airplay_nqptp_version.rc != 0

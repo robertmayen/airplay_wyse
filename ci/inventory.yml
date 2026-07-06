@@ -1,0 +1,19 @@
+---
+all:
+  children:
+    airplay:
+      hosts:
+        wyse-ci:
+          ansible_connection: community.docker.docker
+          ansible_user: root
+          ansible_python_interpreter: /usr/bin/python3
+          # ansible.cfg sets become=True globally; the container has no sudo
+          # and we're already root — connection vars outrank play keywords.
+          ansible_become: false
+          airplay_name: "CI Test Box"
+          # Runners have no sound hardware (azure kernels ship no snd modules).
+          # With standby "never", shairport never opens the device unless a
+          # stream arrives — so it starts and stays up with a phantom card.
+          airplay_alsa_card: "Phantom"
+          airplay_alsa_device: 0
+          airplay_alsa_disable_standby: "never"

@@ -1,8 +1,10 @@
 ---
 shairport_major: "4"
 shairport_sync_version: "4.3.7"
+shairport_sync_commit: "0b1c4391ffd398e7b145eb4b98416261380adeea"   # tag 4.3.7 — checkout truth (tags are mutable)
 nqptp_version: "1.2.8"
-alac_ref: "master"
+nqptp_commit: "c925f27c1fd12e4033ac477e5a405969b0b0260b"            # tag 1.2.8
+alac_ref: "5d8c5db0dfcadd5872f28e665cf4f4303447352a"                # was floating "master"
 
 _shairport_flags:
   "4": >-
@@ -18,9 +20,22 @@ shairport_configure_flags: >-
 # ALAC is required only for the major-4 (apple-alac) profile.
 airplay_required_features: "{{ ['AirPlay 2', 'soxr', 'ALAC'] if shairport_major == '4' else ['AirPlay 2', 'soxr'] }}"
 
+# How binaries get onto the box. "source": clone+compile on the box (original
+# path). "deb": install CI-built debs — downloaded on the CONTROL MACHINE via
+# `gh release download` (works for private repos; boxes never need tokens).
+airplay_install_method: source
+airplay_deb_revision: 1
+airplay_deb_repo: robertmayen/airplay_wyse
+airplay_deb_release_tag: "debs-shairport{{ shairport_sync_version }}-nqptp{{ nqptp_version }}-r{{ airplay_deb_revision }}"
+# Pre-downloaded deb dir on the control machine (skips the gh download).
+# CI's smoke job uses this; operators can too for air-gapped runs.
+airplay_deb_dir: ""
+
 airplay_build_root: /usr/local/src/airplay
 airplay_state_dir: shairport-sync
-airplay_health_timer: false
+# Periodic airplay-doctor run (30 min): publishes JSON to /run/airplay-doctor.json
+# (tmpfs only — never /etc) for the dashboard's health badge.
+airplay_health_timer: true
 
 # Now-playing metadata + D-Bus control + web dashboard (opt-in feature).
 # When true: build shairport with --with-metadata --with-dbus-interface,
@@ -30,13 +45,17 @@ airplay_metadata_enabled: false
 airplay_metadata_pipe: /run/shairport-sync/metadata-pipe
 airplay_dashboard_port: 8080
 # Address the dashboard binds to. It is an UNAUTHENTICATED control surface
-# (volume + disconnect over D-Bus), so anything that can reach this address can
-# control playback. Default is all interfaces for LAN access from phones; set to
-# a specific LAN IP or "127.0.0.1" per-host to restrict reach.
-airplay_dashboard_bind: "0.0.0.0"
+# (volume + disconnect over D-Bus). Default is loopback-only: set this to a
+# LAN IP or "0.0.0.0" per-host/group to allow phones on the LAN to reach it.
+airplay_dashboard_bind: "127.0.0.1"
 
 # Dedicated system user shairport-sync runs as.
 airplay_service_user: shairport-sync
+
+# "always" keeps the DAC open (no standby clicks, device claimed at startup —
+# requires the card to exist). "never"/"auto" open it only during playback;
+# CI uses "never" because runners have no sound hardware.
+airplay_alsa_disable_standby: "always"
 
 # ALSA device addressing. "hw" = raw device (exclusive, soxr does any resampling);
 # "plughw" = ALSA plug layer (automatic format/rate conversion, most tolerant).

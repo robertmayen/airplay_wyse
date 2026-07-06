@@ -15,10 +15,11 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 NAME = os.environ.get("AIRPLAY_NAME", os.uname().nodename)
-BIND = os.environ.get("AIRPLAY_DASHBOARD_BIND", "0.0.0.0")
+BIND = os.environ.get("AIRPLAY_DASHBOARD_BIND", "127.0.0.1")
 PORT = int(os.environ.get("AIRPLAY_DASHBOARD_PORT", "8080"))
 STATE_DIR = os.environ.get("AIRPLAY_STATE_DIR", "/run/airplay")
 STATE_FILE = os.path.join(STATE_DIR, "nowplaying.json")
+DOCTOR_FILE = os.environ.get("AIRPLAY_DOCTOR_FILE", "/run/airplay-doctor.json")
 
 _BUS = ["busctl", "--system", "call", "org.gnome.ShairportSync", "/org/gnome/ShairportSync"]
 SVC_IFACE = "org.gnome.ShairportSync"
@@ -80,11 +81,26 @@ def read_state() -> dict:
                 "volume_percent": 0, "muted": False, "cover": None}
 
 
+def read_doctor() -> dict:
+    """Summarize the health timer's last airplay-doctor report, if any."""
+    try:
+        with open(DOCTOR_FILE, encoding="utf-8") as fh:
+            report = json.load(fh)
+        return {
+            "ok": bool(report.get("ok")),
+            "failed": [c["name"] for c in report.get("checks", []) if not c.get("ok")],
+            "updated": os.path.getmtime(DOCTOR_FILE),
+        }
+    except (OSError, ValueError):
+        return {"ok": None, "failed": [], "updated": 0}
+
+
 def build_status() -> dict:
     return {
         "name": NAME,
         "nowplaying": read_state(),
         "services": {s: service_active(s) for s in ("shairport-sync", "nqptp", "avahi-daemon")},
+        "doctor": read_doctor(),
     }
 
 
@@ -135,8 +151,10 @@ async function tick(){let s;try{s=await(await fetch('/api/status')).json()}catch
  else{$('title').textContent='';$('artist').textContent='';$('album').textContent='';
   $('art').style.backgroundImage='';$('art').textContent='♪';$('state').textContent='idle';}
  if(!dragging){vol.value=n.volume_percent;$('vbadge').textContent=(n.muted?'muted':n.volume_percent+'%')}
+ const d=s.doctor,dsvc=d.ok===null?'doctor —':
+  `<span title="${d.failed.join(', ')}">doctor <span class="dot ${d.ok?'ok':'bad'}"></span></span>`;
  $('svc').innerHTML=Object.entries(s.services).map(([k,v])=>
-  `${k.replace('-sync','').replace('-daemon','')} <span class="dot ${v?'ok':'bad'}"></span>`).join('');}
+  `${k.replace('-sync','').replace('-daemon','')} <span class="dot ${v?'ok':'bad'}"></span>`).join('')+' '+dsvc;}
 tick();setInterval(tick,2000);
 </script></body></html>"""
 
