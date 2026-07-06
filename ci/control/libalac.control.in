@@ -1,0 +1,10 @@
+Package: libalac
+Version: @VERSION@
+Architecture: amd64
+Maintainer: airplay_wyse CI <r.mayen@live.de>
+Section: libs
+Priority: optional
+Depends: @DEPENDS@
+Description: Apple Lossless (ALAC) codec library (airplay_wyse build)
+ mikebrady/alac shared library used by shairport-sync's apple-alac
+ decoder. Installs to /usr/local (private package).

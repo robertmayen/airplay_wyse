@@ -1,0 +1,115 @@
+---
+# Build-once artifact pipeline: compile shairport-sync/nqptp/libalac into
+# amd64 .debs for Debian 13, smoke-test them via a full role converge in the
+# CI systemd container, then publish as GitHub Release assets. The Ansible
+# role consumes them with `-e airplay_install_method=deb` (control machine
+# downloads via `gh release download` and pushes to the boxes).
+name: debs
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'roles/airplay/defaults/main.yml'
+      - 'ci/build-debs.sh'
+      - 'ci/control/**'
+      - '.github/workflows/debs.yml'
+  workflow_dispatch:
+permissions:
+  contents: write   # gh release create
+jobs:
+  build-debs:
+    runs-on: ubuntu-24.04   # amd64, matches the Wyse 5070 fleet
+    container: debian:13    # dpkg-shlibdeps must see trixie package names
+    steps:
+      - name: Install build + packaging deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential git autoconf automake \
+            libtool libpopt-dev libconfig-dev libasound2-dev libavahi-client-dev libssl-dev \
+            libsoxr-dev libplist-dev libglib2.0-dev libsodium-dev libavutil-dev libavcodec-dev \
+            libavformat-dev uuid-dev libgcrypt20-dev xxd systemd-dev ca-certificates dpkg-dev
+      - uses: actions/checkout@v4
+      - name: Read pins from role defaults
+        id: pins
+        run: |
+          for k in shairport_sync_version shairport_sync_commit nqptp_version nqptp_commit alac_ref; do
+            echo "$k=$(grep -oP "^$k: \"\K[^\"]+" roles/airplay/defaults/main.yml)" >> "$GITHUB_OUTPUT"
+          done
+      - name: Build debs
+        run: |
+          ci/build-debs.sh \
+            "${{ steps.pins.outputs.shairport_sync_version }}" "${{ steps.pins.outputs.shairport_sync_commit }}" \
+            "${{ steps.pins.outputs.nqptp_version }}" "${{ steps.pins.outputs.nqptp_commit }}" \
+            "${{ steps.pins.outputs.alac_ref }}" out/
+      - name: SHA256SUMS
+        run: cd out && sha256sum *.deb > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-amd64
+          path: out/
+
+  smoke-debs:
+    needs: build-debs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-amd64
+          path: out
+      - name: Install ansible + docker connection plugin
+        run: |
+          pip install -r requirements-dev.txt
+          ansible-galaxy collection install 'community.docker:>=3.13.0'
+      - name: Load ALSA loopback on runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+          sudo modprobe snd-aloop
+      - name: Start systemd container
+        run: |
+          docker build -t airplay-wyse-ci ci/
+          docker run -d --name wyse-ci --privileged --cgroupns=host \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            --tmpfs /run --tmpfs /run/lock airplay-wyse-ci
+          timeout 60 docker exec wyse-ci bash -c \
+            'until systemctl is-system-running --wait 2>/dev/null; do sleep 2; done; true'
+      - name: Converge with the deb install path
+        run: |
+          ansible-playbook -i ci/inventory.yml site.yml \
+            -e airplay_install_method=deb -e airplay_deb_dir="$PWD/out"
+      - name: Verify services actually running
+        run: |
+          docker exec wyse-ci systemctl is-active nqptp shairport-sync
+          docker exec wyse-ci shairport-sync -V
+          docker exec wyse-ci nqptp -V
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker exec wyse-ci journalctl -u shairport-sync -u nqptp -u avahi-daemon --no-pager -n 200 || true
+          docker exec wyse-ci systemctl --failed --no-pager || true
+
+  release:
+    needs: [build-debs, smoke-debs]
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-amd64
+          path: out
+      - name: Create/replace release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SPS=$(grep -oP '^shairport_sync_version: "\K[^"]+' roles/airplay/defaults/main.yml)
+          NQPTP=$(grep -oP '^nqptp_version: "\K[^"]+' roles/airplay/defaults/main.yml)
+          TAG="debs-shairport${SPS}-nqptp${NQPTP}-r1"
+          gh release view "$TAG" >/dev/null 2>&1 && gh release delete "$TAG" --cleanup-tag -y
+          gh release create "$TAG" out/*.deb out/SHA256SUMS \
+            --title "$TAG" --notes "amd64 debs for Debian 13 (trixie). Prefix: /usr/local."

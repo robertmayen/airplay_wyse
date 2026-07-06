@@ -1,0 +1,11 @@
+Package: shairport-sync
+Version: @VERSION@
+Architecture: amd64
+Maintainer: airplay_wyse CI <r.mayen@live.de>
+Section: sound
+Priority: optional
+Depends: @DEPENDS@
+Description: AirPlay 2 audio receiver (airplay_wyse build)
+ shairport-sync @VERSION@ built with alsa/soxr/avahi/openssl/systemd/
+ airplay-2/apple-alac/metadata/dbus. Installs to /usr/local (private
+ package; pairs with the airplay_wyse Ansible role).

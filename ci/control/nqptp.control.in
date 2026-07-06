@@ -1,0 +1,10 @@
+Package: nqptp
+Version: @VERSION@
+Architecture: amd64
+Maintainer: airplay_wyse CI <r.mayen@live.de>
+Section: sound
+Priority: optional
+Depends: @DEPENDS@
+Description: PTP daemon for AirPlay 2 timing (airplay_wyse build)
+ nqptp @VERSION@ built with --with-systemd-startup. Installs to
+ /usr/local (private package; pairs with the airplay_wyse Ansible role).
