@@ -1,0 +1,25 @@
+---
+# Source-build stamp: gates rebuilds in build.yml. Not written on the deb
+# path — there, installed package versions replace it.
+- name: Ensure stamp directory exists
+  ansible.builtin.file:
+    path: /usr/local/share/airplay
+    state: directory
+    mode: "0755"
+
+- name: Write build stamp
+  ansible.builtin.copy:
+    dest: /usr/local/share/airplay/.versions
+    mode: "0644"
+    content: |
+      {{
+        {
+          "signature": airplay_build_signature,
+          "shairport_version": shairport_sync_version,
+          "nqptp_version": nqptp_version,
+          "alac_ref": alac_ref,
+          "configure_flags": shairport_configure_flags,
+          "shairport_v_output": airplay_sps_version.stdout,
+          "nqptp_v_output": airplay_nqptp_version.stdout
+        } | to_nice_json
+      }}

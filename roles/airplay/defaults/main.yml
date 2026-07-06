@@ -20,6 +20,17 @@ shairport_configure_flags: >-
 # ALAC is required only for the major-4 (apple-alac) profile.
 airplay_required_features: "{{ ['AirPlay 2', 'soxr', 'ALAC'] if shairport_major == '4' else ['AirPlay 2', 'soxr'] }}"
 
+# How binaries get onto the box. "source": clone+compile on the box (original
+# path). "deb": install CI-built debs — downloaded on the CONTROL MACHINE via
+# `gh release download` (works for private repos; boxes never need tokens).
+airplay_install_method: source
+airplay_deb_revision: 1
+airplay_deb_repo: robertmayen/airplay_wyse
+airplay_deb_release_tag: "debs-shairport{{ shairport_sync_version }}-nqptp{{ nqptp_version }}-r{{ airplay_deb_revision }}"
+# Pre-downloaded deb dir on the control machine (skips the gh download).
+# CI's smoke job uses this; operators can too for air-gapped runs.
+airplay_deb_dir: ""
+
 airplay_build_root: /usr/local/src/airplay
 airplay_state_dir: shairport-sync
 airplay_health_timer: false

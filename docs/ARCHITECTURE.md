@@ -12,12 +12,23 @@ machine.
 
 ### shairport-sync
 
-Built from source at a pinned version (`shairport_sync_version` in
-`inventory/group_vars/airplay.yml`) with an explicit feature flag set
-(`airplay_required_features`). The build is stamped and re-run only when the
-stamp file does not exist or the version pin changes. After building, the role
-verifies that the installed binary advertises every required feature before
-proceeding.
+Installed one of two ways, selected by `airplay_install_method`:
+
+- **`source`** (default): built on the box at a pinned version and commit SHA
+  (`shairport_sync_version`/`shairport_sync_commit`) with an explicit feature
+  flag set (`airplay_required_features`). The build is stamped and re-run only
+  when the stamp file does not exist or a pin/flag changes.
+- **`deb`**: CI-built packages from the GitHub Release tagged
+  `debs-shairport<ver>-nqptp<ver>-r<rev>` (built by
+  `.github/workflows/debs.yml` in a Debian 13 container, Depends resolved with
+  `dpkg-shlibdeps`, prefix `/usr/local`). The control machine downloads the
+  assets with `gh release download`, verifies checksums, pushes them to each
+  box, and installs with apt. The shairport deb bakes in metadata+dbus support
+  (runtime-inert unless the config enables it) so one package serves both
+  dashboard profiles.
+
+Either way, the role verifies that the installed binary advertises every
+required feature before proceeding.
 
 ### nqptp
 

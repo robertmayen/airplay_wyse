@@ -1,0 +1,77 @@
+---
+- name: Download release debs on the control machine
+  when: airplay_deb_dir | length == 0
+  become: false
+  delegate_to: localhost
+  run_once: true
+  block:
+    - name: Create download dir
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: airplay-debs
+      register: airplay_deb_tmp
+
+    - name: Fetch release assets (uses your gh auth; private repos OK)
+      ansible.builtin.command: >-
+        gh release download {{ airplay_deb_release_tag }}
+        -R {{ airplay_deb_repo }} -D {{ airplay_deb_tmp.path }}
+      changed_when: false
+
+    - name: Verify checksums
+      ansible.builtin.command: shasum -a 256 --check SHA256SUMS
+      args:
+        chdir: "{{ airplay_deb_tmp.path }}"
+      changed_when: false
+
+    # run_once + set_fact applies the fact to every host in the play.
+    - name: Point deb dir at the download
+      ansible.builtin.set_fact:
+        airplay_deb_dir: "{{ airplay_deb_tmp.path }}"
+
+- name: Find debs to push
+  become: false
+  delegate_to: localhost
+  ansible.builtin.find:
+    paths: "{{ airplay_deb_dir }}"
+    patterns: "*.deb"
+  register: airplay_debs_found
+
+- name: Assert the release carried all three packages
+  ansible.builtin.assert:
+    that:
+      - airplay_debs_found.files | map(attribute='path') | select('search', '/' ~ pkg ~ '_') | list | length == 1
+    fail_msg: "expected exactly one {{ pkg }}_*.deb in {{ airplay_deb_dir }}"
+  loop: ["libalac", "nqptp", "shairport-sync"]
+  loop_control:
+    loop_var: pkg
+
+- name: Ensure deb cache directory
+  ansible.builtin.file:
+    path: /var/cache/airplay-debs
+    state: directory
+    mode: "0755"
+
+- name: Push debs to the box
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/var/cache/airplay-debs/{{ item.path | basename }}"
+    mode: "0644"
+  loop: "{{ airplay_debs_found.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+# Explicit dependency order: shairport-sync Depends on libalac.
+# apt deb-install is idempotent: same version already installed -> no change.
+- name: Install libalac deb
+  ansible.builtin.apt:
+    deb: "/var/cache/airplay-debs/{{ airplay_debs_found.files | map(attribute='path') | map('basename') | select('match', '^libalac_') | first }}"
+
+- name: Install nqptp deb
+  ansible.builtin.apt:
+    deb: "/var/cache/airplay-debs/{{ airplay_debs_found.files | map(attribute='path') | map('basename') | select('match', '^nqptp_') | first }}"
+  notify: Restart nqptp
+
+- name: Install shairport-sync deb
+  ansible.builtin.apt:
+    deb: "/var/cache/airplay-debs/{{ airplay_debs_found.files | map(attribute='path') | map('basename') | select('match', '^shairport-sync_') | first }}"
+  notify: Restart shairport-sync

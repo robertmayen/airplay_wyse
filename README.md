@@ -146,6 +146,27 @@ fix any duplicates by setting `airplay_device_id` in the relevant `host_vars/`.
 2. Re-run `site.yml` against the spare box first (step 3 above).
 3. Roll to the fleet once the spare-box matrix is green.
 
+### Fast rollout via debs (build once in CI)
+
+Every change to the version pins triggers the `debs` GitHub Actions workflow,
+which compiles shairport-sync/nqptp/libalac once for Debian 13 amd64,
+smoke-tests them, and publishes a GitHub Release tagged
+`debs-shairport<ver>-nqptp<ver>-r<rev>`. To roll the fleet from those
+artifacts instead of compiling on every box:
+
+```bash
+# prerequisite: gh CLI authenticated on the control machine (gh auth login)
+ansible-playbook site.yml -e airplay_install_method=deb
+```
+
+The control machine downloads the release assets (private repos work — boxes
+never need tokens), verifies `SHA256SUMS`, pushes the debs to each box, and
+installs them with apt. Boxes no longer need `build-essential` for this path
+(existing toolchains are left in place, not purged). Set
+`airplay_install_method: deb` in `inventory/group_vars/airplay.yml` to make it
+the fleet default, or pass a pre-downloaded directory with
+`-e airplay_deb_dir=/path/to/debs` for air-gapped runs.
+
 ### Drift correction
 
 Re-run `site.yml` — the role is fully idempotent:
