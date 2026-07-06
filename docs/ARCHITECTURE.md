@@ -107,7 +107,8 @@ cloned images.
   same unprivileged user under an equivalent systemd sandbox (`NoNewPrivileges`,
   `ProtectSystem=strict`, restricted address families, `@system-service` syscall
   filter). The dashboard is an **unauthenticated** control surface — reach is
-  restricted via `airplay_dashboard_bind`, not a login. See OPERATIONS.md.
+  restricted via `airplay_dashboard_bind`, not a login. It binds loopback only
+  by default; LAN access is an explicit opt-in. See OPERATIONS.md.
 - Avahi must be active to advertise `_airplay._tcp`.
 
 ## Dependencies
