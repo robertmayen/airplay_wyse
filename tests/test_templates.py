@@ -149,3 +149,16 @@ def test_health_service_writes_json_atomically():
     assert "--json" in out
     assert "/run/airplay-doctor.json.tmp" in out
     assert "mv /run/airplay-doctor.json.tmp /run/airplay-doctor.json" in out
+
+
+def test_config_disable_standby_default_always():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    assert 'disable_standby_mode = "always"' in out
+
+
+def test_config_disable_standby_override():
+    out = render("shairport-sync.conf.j2", airplay_name="X",
+                 airplay_alsa_card="Device", airplay_alsa_device=0,
+                 airplay_alsa_disable_standby="never")
+    assert 'disable_standby_mode = "never"' in out

@@ -247,7 +247,8 @@ make check   # lint + test + syntax-check all playbooks
 ```
 
 CI additionally converges the full role **twice** inside a Debian 13 systemd
-container (with a real ALSA loopback card) and fails if the second run reports
-any changed task — the role's idempotence claim is a regression test, not an
-assertion. Audio, sync, and pairing still require physical hardware (see the
-rollout runbook).
+container and fails if the second run reports any changed task — the role's
+idempotence claim is a regression test, not an assertion. Runners have no
+sound hardware, so CI runs shairport with `airplay_alsa_disable_standby:
+"never"` (device only opened during playback); device-open, audio, sync, and
+pairing still require physical hardware (see the rollout runbook).

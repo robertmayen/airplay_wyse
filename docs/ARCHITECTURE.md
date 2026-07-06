@@ -74,9 +74,11 @@ version-bump.yml (weekly) ──PR──▶ ci.yml (lint + container converge ×
                      fleet rollout: site.yml -e airplay_install_method=deb
 ```
 
-The converge job runs in a privileged Debian 13 systemd container with a real
-ALSA card (`snd-aloop` on the runner) so `shairport-sync` genuinely starts;
-audio/sync/pairing still require physical hardware (spare-box matrix).
+The converge job runs in a privileged Debian 13 systemd container. Runners
+have no sound hardware (azure kernels ship no snd modules), so CI sets
+`airplay_alsa_disable_standby: "never"` — shairport starts and stays up
+without opening the (phantom) device. Device-open, audio, sync, and pairing
+still require physical hardware (spare-box matrix).
 
 ### airplay-doctor
 

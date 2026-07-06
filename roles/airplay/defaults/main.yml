@@ -52,6 +52,11 @@ airplay_dashboard_bind: "127.0.0.1"
 # Dedicated system user shairport-sync runs as.
 airplay_service_user: shairport-sync
 
+# "always" keeps the DAC open (no standby clicks, device claimed at startup —
+# requires the card to exist). "never"/"auto" open it only during playback;
+# CI uses "never" because runners have no sound hardware.
+airplay_alsa_disable_standby: "always"
+
 # ALSA device addressing. "hw" = raw device (exclusive, soxr does any resampling);
 # "plughw" = ALSA plug layer (automatic format/rate conversion, most tolerant).
 # Set to "plughw" per-host if a DAC rejects the raw format.
