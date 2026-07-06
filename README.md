@@ -167,6 +167,27 @@ installs them with apt. Boxes no longer need `build-essential` for this path
 the fleet default, or pass a pre-downloaded directory with
 `-e airplay_deb_dir=/path/to/debs` for air-gapped runs.
 
+### Automated version-bump PRs
+
+A weekly workflow (`.github/workflows/version-bump.yml`) checks the latest
+`mikebrady/shairport-sync` and `mikebrady/nqptp` releases and opens/updates a
+PR bumping the version pins **and** their commit SHAs. It never bumps
+shairport-sync across `shairport_major` — that changes the configure-flag
+profile, so it is surfaced as a notice in the PR body for a human call.
+
+One-time setup (without this the bot PR shows **zero CI checks** — PRs created
+with the default `GITHUB_TOKEN` do not trigger other workflows):
+
+1. Create a fine-grained PAT scoped to this repo with **Contents: RW** and
+   **Pull requests: RW**; store it as the `VERSION_BUMP_TOKEN` repo secret.
+   Note the PAT's expiry date as a maintenance item.
+2. Enable *Settings → Actions → General → Allow GitHub Actions to create and
+   approve pull requests*.
+
+Merging the bump PR touches `roles/airplay/defaults/main.yml`, which triggers
+the `debs` workflow → new release tag → fleet rollout via
+`-e airplay_install_method=deb`.
+
 ### Drift correction
 
 Re-run `site.yml` — the role is fully idempotent:

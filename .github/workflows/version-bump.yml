@@ -1,0 +1,34 @@
+---
+name: version-bump
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays 06:17 UTC, off the :00 herd
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check upstream and rewrite pins
+        id: bump
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # API rate limit only
+        run: |
+          python scripts/check_upstream.py --apply roles/airplay/defaults/main.yml \
+            --summary-out /tmp/bump-summary.md
+          echo "changed=$(git diff --quiet && echo false || echo true)" >> "$GITHUB_OUTPUT"
+      # PAT (not github.token) so the PR triggers ci.yml — see README setup note.
+      - uses: peter-evans/create-pull-request@v7
+        if: steps.bump.outputs.changed == 'true'
+        with:
+          token: ${{ secrets.VERSION_BUMP_TOKEN }}
+          branch: ci/version-bump
+          commit-message: "chore: bump upstream version pins"
+          title: "chore: bump shairport-sync/nqptp pins"
+          body-path: /tmp/bump-summary.md
