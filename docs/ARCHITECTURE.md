@@ -62,6 +62,22 @@ roles/airplay/
 | `migration.yml` | One-time cleanup of the legacy Python/shell stack: removes `/var/lib/airplay_wyse/`, `/usr/local/libexec/airplay_wyse/`, and legacy systemd units |
 | `doctor.yml` | Non-invasive fleet health check: runs `airplay-doctor --check` on every host and checks for duplicate AirPlay device IDs across the fleet |
 
+### CI / release pipeline
+
+```
+version-bump.yml (weekly) ──PR──▶ ci.yml (lint + container converge ×2,
+                                   idempotence gate)          │ merge
+                                                              ▼
+                     debs.yml (build .debs → converge smoke → GitHub Release
+                               debs-shairport<v>-nqptp<v>-r<rev>)
+                                                              │
+                     fleet rollout: site.yml -e airplay_install_method=deb
+```
+
+The converge job runs in a privileged Debian 13 systemd container with a real
+ALSA card (`snd-aloop` on the runner) so `shairport-sync` genuinely starts;
+audio/sync/pairing still require physical hardware (spare-box matrix).
+
 ### airplay-doctor
 
 A small Python tool installed to `/usr/local/bin/airplay-doctor` on each box

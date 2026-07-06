@@ -65,7 +65,9 @@ Compare the reported shairport version against `shairport_sync_version` in
 
 ### 2. Build / syntax smoke — VM or container (optional)
 
-Verify the playbook parses and the from-source build completes:
+CI already does this automatically: every push converges the role twice in a
+Debian 13 systemd container and gates on idempotence. Run it manually only if
+you want a local smoke first:
 
 ```bash
 ansible-playbook --syntax-check site.yml migration.yml doctor.yml
@@ -221,16 +223,19 @@ airplay_wyse/
 ├── inventory/          # hosts.yml + host_vars/
 ├── inventory/group_vars/  # airplay.yml (version pins, build flags)
 ├── roles/
-│   └── airplay/        # from-source build, config, hardened systemd, doctor
-│       ├── defaults/   # all tunable variables
-│       ├── tasks/      # install → build → configure → units → doctor
+│   └── airplay/        # source or deb install, config, hardened systemd, doctor
+│       ├── defaults/   # all tunable variables (pins + commit SHAs)
+│       ├── tasks/      # build/install_deb → verify → configure → units → doctor
 │       ├── templates/  # shairport-sync.conf.j2, unit overrides
 │       └── handlers/   # daemon-reload + service restart
 ├── site.yml            # full provisioning (converge)
 ├── migration.yml       # one-time cleanup of the old Python/shell stack
 ├── doctor.yml          # non-invasive fleet health + duplicate-id check
+├── ci/                 # CI systemd container, inventory, deb build script
+├── scripts/            # check_upstream.py (version-bump automation)
+├── .github/workflows/  # ci (lint+converge), debs (packages), version-bump
 ├── docs/               # ARCHITECTURE.md, OPERATIONS.md
-└── tests/              # pytest suite for airplay-doctor parsers
+└── tests/              # pytest: doctor/dashboard/nowplaying, templates, bumper
 ```
 
 ## Linting and Testing
