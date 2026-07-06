@@ -42,3 +42,4 @@ inventory/secrets.yml
 coverage/
 /.tags
 /.tags*
+.superpowers/
