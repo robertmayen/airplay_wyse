@@ -42,8 +42,12 @@ jobs:
           docker run -d --name wyse-ci --privileged --cgroupns=host \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
             --tmpfs /run --tmpfs /run/lock airplay-wyse-ci
-          timeout 60 docker exec wyse-ci bash -c \
-            'until systemctl is-system-running --wait 2>/dev/null; do sleep 2; done; true'
+          # "degraded" is the normal steady state in a container (some units
+          # always fail there) — only starting/initializing mean "not ready".
+          timeout 120 docker exec wyse-ci bash -c \
+            'until [ "$(systemctl is-system-running 2>/dev/null)" = running ] \
+                || [ "$(systemctl is-system-running 2>/dev/null)" = degraded ]; do sleep 2; done'
+          docker exec wyse-ci systemctl is-system-running || true
       - name: "Converge (run 1: build from source)"
         run: ansible-playbook -i ci/inventory.yml site.yml
       - name: "Idempotence (run 2: must report changed=0)"
@@ -57,6 +61,13 @@ jobs:
           docker exec wyse-ci shairport-sync -V
       - name: Dump logs on failure
         if: failure()
+        # tail emitted as ::error:: annotations — readable via the public
+        # checks API, unlike raw job logs.
         run: |
           docker exec wyse-ci journalctl -u shairport-sync -u nqptp -u avahi-daemon --no-pager -n 200 || true
-          docker exec wyse-ci systemctl --failed --no-pager || true
+          {
+            docker ps -a
+            docker logs wyse-ci 2>&1 | tail -10
+            docker exec wyse-ci systemctl is-system-running || true
+            docker exec wyse-ci systemctl --failed --no-pager || true
+          } 2>&1 | tail -25 | while IFS= read -r line; do echo "::error::$line"; done

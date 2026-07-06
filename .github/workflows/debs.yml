@@ -71,8 +71,12 @@ jobs:
           docker run -d --name wyse-ci --privileged --cgroupns=host \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
             --tmpfs /run --tmpfs /run/lock airplay-wyse-ci
-          timeout 60 docker exec wyse-ci bash -c \
-            'until systemctl is-system-running --wait 2>/dev/null; do sleep 2; done; true'
+          # "degraded" is the normal steady state in a container (some units
+          # always fail there) — only starting/initializing mean "not ready".
+          timeout 120 docker exec wyse-ci bash -c \
+            'until [ "$(systemctl is-system-running 2>/dev/null)" = running ] \
+                || [ "$(systemctl is-system-running 2>/dev/null)" = degraded ]; do sleep 2; done'
+          docker exec wyse-ci systemctl is-system-running || true
       - name: Converge with the deb install path
         run: |
           ansible-playbook -i ci/inventory.yml site.yml \
