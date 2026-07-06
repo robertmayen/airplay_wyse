@@ -77,25 +77,30 @@ import subprocess
 import sys
 
 
+PROBE_CMDS = {
+    "shairport_version": ["shairport-sync", "-V"],
+    "ss": ["ss", "-ulnp"],
+    "mdns": ["avahi-browse", "-atp", "--no-db-lookup", "-r", "-l"],
+    "aplay": ["aplay", "-L"],
+    # -b + --since: only current boot, only the last hour — a historical xrun
+    # must not fail health forever (journal lines otherwise linger for days).
+    "journal": ["journalctl", "-u", "shairport-sync", "-b", "--since", "-1h",
+                "-n", "200", "--no-pager"],
+}
+
+
 def _system_runner(name: str) -> str:
     """Default runner: maps a probe name to real captured command output."""
     if name.startswith("is_active:"):
         svc = name.split(":", 1)[1]
         return _capture(["systemctl", "is-active", svc])
-    cmds = {
-        "shairport_version": ["shairport-sync", "-V"],
-        "ss": ["ss", "-ulnp"],
-        "mdns": ["avahi-browse", "-atp", "--no-db-lookup", "-r", "-l"],
-        "aplay": ["aplay", "-L"],
-        "journal": ["journalctl", "-u", "shairport-sync", "-n", "200", "--no-pager"],
-    }
     if name == "config":
         try:
             with open("/etc/shairport-sync.conf", encoding="utf-8") as fh:
                 return fh.read()
         except OSError:
             return ""
-    return _capture(cmds.get(name, ["true"]))
+    return _capture(PROBE_CMDS.get(name, ["true"]))
 
 
 def _capture(cmd) -> str:

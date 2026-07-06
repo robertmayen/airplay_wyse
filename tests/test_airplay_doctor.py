@@ -71,6 +71,12 @@ def test_journal_error_counts():
     assert r["sync"] == 1
 
 
+def test_journal_probe_is_scoped_to_recent_boot():
+    cmd = ad.PROBE_CMDS["journal"]
+    assert "-b" in cmd
+    assert "--since" in cmd
+
+
 def test_device_id_parse_and_zero():
     assert ad.parse_device_id('  airplay_device_id = "5C:AA:FD:11:22:33";') == "5C:AA:FD:11:22:33"
     assert ad.is_zero_device_id("00:00:00:00:00:00") is True
