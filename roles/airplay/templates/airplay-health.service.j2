@@ -1,6 +1,9 @@
 [Unit]
 Description=AirPlay Wyse health check
+# Managed by airplay_wyse Ansible.
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/airplay-doctor --check
+# Atomic write; doctor's exit code is preserved so an unhealthy box still
+# flips this unit (and `systemctl --failed`) red. The dashboard reads the JSON.
+ExecStart=/bin/sh -c '/usr/local/bin/airplay-doctor --json > /run/airplay-doctor.json.tmp; rc=$?; mv /run/airplay-doctor.json.tmp /run/airplay-doctor.json; exit $rc'

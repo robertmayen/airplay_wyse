@@ -33,7 +33,9 @@ airplay_deb_dir: ""
 
 airplay_build_root: /usr/local/src/airplay
 airplay_state_dir: shairport-sync
-airplay_health_timer: false
+# Periodic airplay-doctor run (30 min): publishes JSON to /run/airplay-doctor.json
+# (tmpfs only — never /etc) for the dashboard's health badge.
+airplay_health_timer: true
 
 # Now-playing metadata + D-Bus control + web dashboard (opt-in feature).
 # When true: build shairport with --with-metadata --with-dbus-interface,

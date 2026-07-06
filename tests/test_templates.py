@@ -142,3 +142,10 @@ def test_unit_no_output_detect_runs_as_user():
     assert "ExecStart=/usr/local/bin/shairport-sync -c /etc/shairport-sync.conf" in out
     assert "living room" in out
     assert "Restart=on-failure" in out
+
+
+def test_health_service_writes_json_atomically():
+    out = render("airplay-health.service.j2")
+    assert "--json" in out
+    assert "/run/airplay-doctor.json.tmp" in out
+    assert "mv /run/airplay-doctor.json.tmp /run/airplay-doctor.json" in out

@@ -62,6 +62,18 @@ airplay-doctor --json             # machine-readable output
 airplay-doctor --deep             # adds ALSA device-open probe (optional)
 ```
 
+### Continuous (health timer + dashboard badge)
+
+`airplay-health.timer` (on by default) runs the doctor every 30 minutes and
+writes the JSON report to `/run/airplay-doctor.json`. The dashboard shows it
+as a `doctor` badge: green = all checks pass, red = hover for the failing
+check names, `doctor —` = no report yet (timer disabled or not yet fired).
+
+```bash
+systemctl status airplay-health   # last run + exit state (red when unhealthy)
+systemctl start airplay-health    # force a fresh report now
+```
+
 ## Updating shairport-sync
 
 1. Bump `shairport_sync_version` (and `nqptp_version`/`alac_ref` as needed) in

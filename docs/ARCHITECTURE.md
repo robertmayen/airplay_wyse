@@ -100,6 +100,12 @@ There are **no** boot-time oneshot services for identity, ALSA policy, or
 PipeWire policy. Configuration is applied at provision time by Ansible and
 does not change between runs unless the role is re-applied.
 
+The health timer (`airplay-health.timer`, on by default, every 30 min) runs
+`airplay-doctor --json` and publishes the report atomically to
+`/run/airplay-doctor.json` — tmpfs only, never `/etc`. The dashboard renders
+it as a health badge; the oneshot unit itself goes red (`systemctl --failed`)
+when the doctor reports unhealthy.
+
 ## Identity and Configuration
 
 `airplay_name` and `airplay_alsa_card` are set per-host in `host_vars/`. The
