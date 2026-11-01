@@ -83,8 +83,7 @@ PROBE_CMDS = {
     "aplay": ["aplay", "-L"],
     # -b + --since: only current boot, only the last hour — a historical xrun
     # must not fail health forever (journal lines otherwise linger for days).
-    "journal": ["journalctl", "-u", "shairport-sync", "-b", "--since", "-1h",
-                "-n", "200", "--no-pager"],
+    "journal": ["journalctl", "-u", "shairport-sync", "-b", "--since", "-1h", "-n", "200", "--no-pager"],
 }
 ```
 
@@ -114,13 +113,16 @@ def test_parse_output_device():
 
 
 def test_deep_probe_pass_and_fail():
-    ok_out = "HW Params of device \"hw:CARD=Device,DEV=0\":\nACCESS: MMAP_INTERLEAVED\n"
-    r = ad.build_report(_fixture_runner(
-        {"deep_open:hw:CARD=Device,DEV=0": ok_out}), deep=True)
+    ok_out = 'HW Params of device "hw:CARD=Device,DEV=0":\nACCESS: MMAP_INTERLEAVED\n'
+    r = ad.build_report(_fixture_runner({"deep_open:hw:CARD=Device,DEV=0": ok_out}), deep=True)
     assert any(c["name"] == "deep:device-open" and c["ok"] for c in r["checks"])
 
-    r = ad.build_report(_fixture_runner(
-        {"deep_open:hw:CARD=Device,DEV=0": "aplay: main:834: audio open error: Device or resource busy\n"}), deep=True)
+    r = ad.build_report(
+        _fixture_runner(
+            {"deep_open:hw:CARD=Device,DEV=0": "aplay: main:834: audio open error: Device or resource busy\n"}
+        ),
+        deep=True,
+    )
     assert r["ok"] is False
     assert any(c["name"] == "deep:device-open" and not c["ok"] for c in r["checks"])
 
@@ -142,16 +144,20 @@ def parse_output_device(conf_text: str) -> str:
 In `_system_runner`, handle the probe prefix (before the `PROBE_CMDS` lookup):
 
 ```python
-    if name.startswith("deep_open:"):
-        dev = name.split(":", 1)[1]
-        # aplay prints hw params to stderr; merge so the token check sees them.
-        try:
-            r = subprocess.run(
-                ["aplay", "-D", dev, "--dump-hw-params", "-d", "1", "/dev/zero"],
-                capture_output=True, text=True, check=False, timeout=10)
-            return r.stdout + r.stderr
-        except (OSError, subprocess.SubprocessError):
-            return ""
+if name.startswith("deep_open:"):
+    dev = name.split(":", 1)[1]
+    # aplay prints hw params to stderr; merge so the token check sees them.
+    try:
+        r = subprocess.run(
+            ["aplay", "-D", dev, "--dump-hw-params", "-d", "1", "/dev/zero"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        return r.stdout + r.stderr
+    except (OSError, subprocess.SubprocessError):
+        return ""
 ```
 
 In `build_report`, replace the placeholder block; it must reuse `conf` (already read) and the check reports the probed device as detail:
@@ -630,8 +636,9 @@ def test_read_doctor_missing_file(tmp_path, monkeypatch):
 
 def test_read_doctor_parses_report(tmp_path, monkeypatch):
     f = tmp_path / "doctor.json"
-    f.write_text('{"ok": false, "checks": [{"name": "mdns:raop", "ok": false},'
-                 ' {"name": "service:nqptp", "ok": true}]}')
+    f.write_text(
+        '{"ok": false, "checks": [{"name": "mdns:raop", "ok": false}, {"name": "service:nqptp", "ok": true}]}'
+    )
     monkeypatch.setattr(dash, "DOCTOR_FILE", str(f))
     d = dash.read_doctor()
     assert d["ok"] is False
@@ -705,22 +712,19 @@ def test_parse_pins():
 
 
 def test_plan_bumps_minor_within_major():
-    plan = cu.plan_bumps(cu.parse_pins(PINS),
-                         {"shairport-sync": "4.3.8", "nqptp": "1.2.9"})
+    plan = cu.plan_bumps(cu.parse_pins(PINS), {"shairport-sync": "4.3.8", "nqptp": "1.2.9"})
     assert plan["shairport_sync_version"] == {"from": "4.3.7", "to": "4.3.8"}
     assert plan["nqptp_version"] == {"from": "1.2.8", "to": "1.2.9"}
 
 
 def test_plan_bumps_never_crosses_major():
-    plan = cu.plan_bumps(cu.parse_pins(PINS),
-                         {"shairport-sync": "5.0.4", "nqptp": "1.2.8"})
+    plan = cu.plan_bumps(cu.parse_pins(PINS), {"shairport-sync": "5.0.4", "nqptp": "1.2.8"})
     assert "shairport_sync_version" not in plan
     assert any("major" in n for n in plan["_notices"])
 
 
 def test_plan_bumps_noop_and_v_prefix():
-    plan = cu.plan_bumps(cu.parse_pins(PINS),
-                         {"shairport-sync": "v4.3.7", "nqptp": "1.2.8"})
+    plan = cu.plan_bumps(cu.parse_pins(PINS), {"shairport-sync": "v4.3.7", "nqptp": "1.2.8"})
     assert plan == {"_notices": []}
 
 
@@ -750,7 +754,8 @@ def plan_bumps(current: dict, latest: dict) -> dict:
             if _vtuple(sps) > _vtuple(current["shairport_sync_version"]):
                 plan["_notices"].append(
                     f"shairport-sync {sps} available but crosses major "
-                    f"{current['shairport_major']}->{_vtuple(sps)[0]}; not auto-bumped")
+                    f"{current['shairport_major']}->{_vtuple(sps)[0]}; not auto-bumped"
+                )
         elif _vtuple(sps) > _vtuple(current["shairport_sync_version"]):
             plan["shairport_sync_version"] = {"from": current["shairport_sync_version"], "to": sps}
     nq = latest.get("nqptp", "").lstrip("v")

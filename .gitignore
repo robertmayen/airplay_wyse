@@ -28,8 +28,9 @@ dist/
 *.deb
 *.tar.gz
 
-# Ansible
+# Ansible (.ansible/ = collections/cache installed by ansible-lint / galaxy)
 *.retry
+.ansible/
 
 # Local fleet inventory + secrets (never commit real hosts/creds)
 inventory/*.local.yml

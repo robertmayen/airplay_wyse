@@ -22,22 +22,19 @@ def test_parse_pins():
 
 
 def test_plan_bumps_minor_within_major():
-    plan = cu.plan_bumps(cu.parse_pins(PINS),
-                         {"shairport-sync": "4.3.8", "nqptp": "1.2.9"})
+    plan = cu.plan_bumps(cu.parse_pins(PINS), {"shairport-sync": "4.3.8", "nqptp": "1.2.9"})
     assert plan["shairport_sync_version"] == {"from": "4.3.7", "to": "4.3.8"}
     assert plan["nqptp_version"] == {"from": "1.2.8", "to": "1.2.9"}
 
 
 def test_plan_bumps_never_crosses_major():
-    plan = cu.plan_bumps(cu.parse_pins(PINS),
-                         {"shairport-sync": "5.0.4", "nqptp": "1.2.8"})
+    plan = cu.plan_bumps(cu.parse_pins(PINS), {"shairport-sync": "5.0.4", "nqptp": "1.2.8"})
     assert "shairport_sync_version" not in plan
     assert any("major" in n for n in plan["_notices"])
 
 
 def test_plan_bumps_noop_and_v_prefix():
-    plan = cu.plan_bumps(cu.parse_pins(PINS),
-                         {"shairport-sync": "v4.3.7", "nqptp": "1.2.8"})
+    plan = cu.plan_bumps(cu.parse_pins(PINS), {"shairport-sync": "v4.3.7", "nqptp": "1.2.8"})
     assert plan == {"_notices": []}
 
 

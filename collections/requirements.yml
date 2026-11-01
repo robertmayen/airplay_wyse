@@ -1,0 +1,6 @@
+---
+# Collections needed on the control machine. The role itself uses only
+# ansible.builtin; community.docker is the CI container connection plugin.
+collections:
+  - name: community.docker
+    version: ">=5.0.0,<6.0.0"

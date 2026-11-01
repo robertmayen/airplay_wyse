@@ -48,8 +48,9 @@ def test_read_doctor_missing_file(tmp_path, monkeypatch):
 
 def test_read_doctor_parses_report(tmp_path, monkeypatch):
     f = tmp_path / "doctor.json"
-    f.write_text('{"ok": false, "checks": [{"name": "mdns:raop", "ok": false},'
-                 ' {"name": "service:nqptp", "ok": true}]}')
+    f.write_text(
+        '{"ok": false, "checks": [{"name": "mdns:raop", "ok": false}, {"name": "service:nqptp", "ok": true}]}'
+    )
     monkeypatch.setattr(db, "DOCTOR_FILE", str(f))
     d = db.read_doctor()
     assert d["ok"] is False

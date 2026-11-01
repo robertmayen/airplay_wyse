@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """airplay-doctor — diagnostics/health for an AirPlay 2 endpoint (stdlib only)."""
+
 from __future__ import annotations
 
+import argparse
+import json
 import re
+import socket
+import subprocess
+import sys
 
 
 def parse_shairport_version(text: str) -> dict:
@@ -75,13 +81,6 @@ def is_zero_device_id(dev_id: str) -> bool:
     return digits == "" or set(digits) <= {"0"}
 
 
-import argparse
-import json
-import socket
-import subprocess
-import sys
-
-
 PROBE_CMDS = {
     "shairport_version": ["shairport-sync", "-V"],
     "ss": ["ss", "-ulnp"],
@@ -89,8 +88,7 @@ PROBE_CMDS = {
     "aplay": ["aplay", "-L"],
     # -b + --since: only current boot, only the last hour — a historical xrun
     # must not fail health forever (journal lines otherwise linger for days).
-    "journal": ["journalctl", "-u", "shairport-sync", "-b", "--since", "-1h",
-                "-n", "200", "--no-pager"],
+    "journal": ["journalctl", "-u", "shairport-sync", "-b", "--since", "-1h", "-n", "200", "--no-pager"],
 }
 
 
@@ -105,7 +103,11 @@ def _system_runner(name: str) -> str:
         try:
             r = subprocess.run(
                 ["aplay", "-D", dev, "--dump-hw-params", "-d", "1", "/dev/zero"],
-                capture_output=True, text=True, check=False, timeout=10)
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
             return r.stdout + r.stderr
         except (OSError, subprocess.SubprocessError):
             return ""

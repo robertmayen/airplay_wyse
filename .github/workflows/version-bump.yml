@@ -11,10 +11,12 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
       - name: Check upstream and rewrite pins
         id: bump
         env:
@@ -24,7 +26,7 @@ jobs:
             --summary-out /tmp/bump-summary.md
           echo "changed=$(git diff --quiet && echo false || echo true)" >> "$GITHUB_OUTPUT"
       # PAT (not github.token) so the PR triggers ci.yml — see README setup note.
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
         if: steps.bump.outputs.changed == 'true'
         with:
           token: ${{ secrets.VERSION_BUMP_TOKEN }}

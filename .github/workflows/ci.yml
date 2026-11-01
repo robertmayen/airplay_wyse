@@ -2,72 +2,69 @@
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
       - name: Install dev deps
-        run: pip install -r requirements-dev.txt
-      - name: yamllint
-        run: yamllint .
-      - name: ansible-lint
-        run: ansible-lint
-      - name: syntax-check
-        run: ansible-playbook --syntax-check site.yml migration.yml doctor.yml
-      - name: pytest
-        run: pytest -v
+        run: |
+          pip install -r requirements-dev.txt
+          ansible-galaxy collection install -r collections/requirements.yml
+      - name: Lint, test, syntax-check
+        run: make check
 
   converge:
+    needs: lint-test
     runs-on: ubuntu-24.04  # pinned: systemd-in-docker/cgroup behavior
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible-core: ["2.20.10", "2.21.5"]
+    name: converge (ansible-core ${{ matrix.ansible-core }})
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          python-version: "3.12"
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
       - name: Install ansible + docker connection plugin
         run: |
           pip install -r requirements-dev.txt
-          ansible-galaxy collection install 'community.docker:>=3.13.0'
-      - name: Build systemd container image
-        run: docker build -t airplay-wyse-ci ci/
-      - name: Start container
-        run: |
-          docker run -d --name wyse-ci --privileged --cgroupns=host \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-            --tmpfs /run --tmpfs /run/lock airplay-wyse-ci
-          # "degraded" is the normal steady state in a container (some units
-          # always fail there) — only starting/initializing mean "not ready".
-          timeout 120 docker exec wyse-ci bash -c \
-            'until [ "$(systemctl is-system-running 2>/dev/null)" = running ] \
-                || [ "$(systemctl is-system-running 2>/dev/null)" = degraded ]; do sleep 2; done'
-          docker exec wyse-ci systemctl is-system-running || true
+          pip install "ansible-core==${{ matrix.ansible-core }}"
+          ansible-galaxy collection install -r collections/requirements.yml
+      - name: Start systemd container
+        run: ci/converge.sh up
       - name: "Converge (run 1: build from source)"
-        run: ansible-playbook -i ci/inventory.yml site.yml
+        run: ci/converge.sh play
       - name: "Idempotence (run 2: must report changed=0)"
-        run: |
-          ansible-playbook -i ci/inventory.yml site.yml --diff | tee /tmp/run2.log
-          grep -E 'wyse-ci\s*:\s*ok=[0-9]+\s+changed=0\s+unreachable=0\s+failed=0' /tmp/run2.log \
-            || { echo "::error::Second run not idempotent"; exit 1; }
+        run: ci/converge.sh idempotent --diff
       - name: Verify services actually running
         run: |
-          docker exec wyse-ci systemctl is-active nqptp shairport-sync
-          docker exec wyse-ci shairport-sync -V
+          ci/converge.sh exec systemctl is-active nqptp shairport-sync
+          ci/converge.sh exec shairport-sync -V
       - name: Dump logs on failure
         if: failure()
-        # tail emitted as ::error:: annotations — readable via the public
-        # checks API, unlike raw job logs.
-        run: |
-          docker exec wyse-ci journalctl -u shairport-sync -u nqptp -u avahi-daemon --no-pager -n 200 || true
-          {
-            docker ps -a
-            docker logs wyse-ci 2>&1 | tail -10
-            docker exec wyse-ci systemctl is-system-running || true
-            docker exec wyse-ci systemctl --failed --no-pager || true
-          } 2>&1 | tail -25 | while IFS= read -r line; do echo "::error::$line"; done
+        run: ci/converge.sh logs

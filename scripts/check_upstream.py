@@ -7,6 +7,7 @@ network I/O lives in main(). shairport-sync is never auto-bumped across
 `shairport_major` — the configure-flag profile and required-feature set differ
 per major, so that jump is a human decision, surfaced as a notice instead.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,7 +38,8 @@ def plan_bumps(current: dict, latest: dict) -> dict:
             if _vtuple(sps) > _vtuple(current["shairport_sync_version"]):
                 plan["_notices"].append(
                     f"shairport-sync {sps} available but crosses major "
-                    f"{current['shairport_major']}->{_vtuple(sps)[0]}; not auto-bumped")
+                    f"{current['shairport_major']}->{_vtuple(sps)[0]}; not auto-bumped"
+                )
         elif _vtuple(sps) > _vtuple(current["shairport_sync_version"]):
             plan["shairport_sync_version"] = {"from": current["shairport_sync_version"], "to": sps}
     nq = latest.get("nqptp", "").lstrip("v")
@@ -53,6 +55,7 @@ def rewrite_pins(text: str, new_values: dict) -> str:
 
 
 # --- network layer (not unit-tested) ----------------------------------------
+
 
 def _api_get(path: str) -> dict | None:
     req = urllib.request.Request(f"{API}/{path}")

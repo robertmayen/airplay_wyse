@@ -14,8 +14,10 @@ on:
       - 'ci/control/**'
       - '.github/workflows/debs.yml'
   workflow_dispatch:
+# Least privilege: only the release job may write. Build steps run upstream
+# configure/make as root, so no job that builds holds a write token.
 permissions:
-  contents: write   # gh release create
+  contents: read
 jobs:
   build-debs:
     runs-on: ubuntu-24.04   # amd64, matches the Wyse 5070 fleet
@@ -28,7 +30,9 @@ jobs:
             libtool libpopt-dev libconfig-dev libasound2-dev libavahi-client-dev libssl-dev \
             libsoxr-dev libplist-dev libglib2.0-dev libsodium-dev libavutil-dev libavcodec-dev \
             libavformat-dev uuid-dev libgcrypt20-dev xxd systemd-dev ca-certificates dpkg-dev
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
       - name: Read pins from role defaults
         id: pins
         run: |
@@ -43,7 +47,7 @@ jobs:
             "${{ steps.pins.outputs.alac_ref }}" out/
       - name: SHA256SUMS
         run: cd out && sha256sum *.deb > SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: debs-amd64
           path: out/
@@ -53,52 +57,48 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          python-version: "3.12"
-      - uses: actions/download-artifact@v4
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: debs-amd64
           path: out
       - name: Install ansible + docker connection plugin
         run: |
           pip install -r requirements-dev.txt
-          ansible-galaxy collection install 'community.docker:>=3.13.0'
+          ansible-galaxy collection install -r collections/requirements.yml
       - name: Start systemd container
-        run: |
-          docker build -t airplay-wyse-ci ci/
-          docker run -d --name wyse-ci --privileged --cgroupns=host \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-            --tmpfs /run --tmpfs /run/lock airplay-wyse-ci
-          # "degraded" is the normal steady state in a container (some units
-          # always fail there) — only starting/initializing mean "not ready".
-          timeout 120 docker exec wyse-ci bash -c \
-            'until [ "$(systemctl is-system-running 2>/dev/null)" = running ] \
-                || [ "$(systemctl is-system-running 2>/dev/null)" = degraded ]; do sleep 2; done'
-          docker exec wyse-ci systemctl is-system-running || true
+        run: ci/converge.sh up
       - name: Converge with the deb install path
-        run: |
-          ansible-playbook -i ci/inventory.yml site.yml \
-            -e airplay_install_method=deb -e airplay_deb_dir="$PWD/out"
+        run: ci/converge.sh play -e airplay_install_method=deb -e airplay_deb_dir="$PWD/out"
+      - name: Idempotence
+        run: ci/converge.sh idempotent -e airplay_install_method=deb -e airplay_deb_dir="$PWD/out"
       - name: Verify services actually running
         run: |
-          docker exec wyse-ci systemctl is-active nqptp shairport-sync
-          docker exec wyse-ci shairport-sync -V
-          docker exec wyse-ci nqptp -V
+          ci/converge.sh exec systemctl is-active nqptp shairport-sync
+          ci/converge.sh exec shairport-sync -V
+          ci/converge.sh exec nqptp -V
       - name: Dump logs on failure
         if: failure()
-        run: |
-          docker exec wyse-ci journalctl -u shairport-sync -u nqptp -u avahi-daemon --no-pager -n 200 || true
-          docker exec wyse-ci systemctl --failed --no-pager || true
+        run: ci/converge.sh logs
 
   release:
     needs: [build-debs, smoke-debs]
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # Only main publishes. A manual run from a feature branch must never
+    # replace the release the fleet installs from.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # gh release create
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: debs-amd64
           path: out

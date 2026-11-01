@@ -243,6 +243,7 @@ Expected: FAIL — `airplay_doctor.py` does not exist / no `parse_shairport_vers
 ```python
 #!/usr/bin/env python3
 """airplay-doctor — diagnostics/health for an AirPlay 2 endpoint (stdlib only)."""
+
 from __future__ import annotations
 
 import re
@@ -440,12 +441,11 @@ def _fixture_runner(overrides=None):
         "is_active:avahi-daemon": "active",
         "shairport_version": "4.3.7-OpenSSL-ALSA-soxr-AirPlay2",
         "ss": 'UNCONN 0 0 0.0.0.0:319 0.0.0.0:* users:(("nqptp",pid=1,fd=4))\n'
-              'UNCONN 0 0 0.0.0.0:320 0.0.0.0:* users:(("nqptp",pid=1,fd=5))\n',
+        'UNCONN 0 0 0.0.0.0:320 0.0.0.0:* users:(("nqptp",pid=1,fd=5))\n',
         "mdns": "+ eth0 IPv4 X _airplay._tcp local\n+ eth0 IPv4 X _raop._tcp local\n",
         "aplay": "hw:CARD=Device,DEV=0\n",
         "journal": "all good\n",
-        "config": 'airplay_device_id = "5C:AA:FD:11:22:33";\n'
-                  'output_device = "hw:CARD=Device,DEV=0";\n',
+        "config": 'airplay_device_id = "5C:AA:FD:11:22:33";\noutput_device = "hw:CARD=Device,DEV=0";\n',
     }
     if overrides:
         base.update(overrides)
@@ -480,6 +480,7 @@ def test_main_json_exit_code(capsys):
     rc = ad.main(["--json"], runner=_fixture_runner())
     out = capsys.readouterr().out
     import json
+
     assert json.loads(out)["ok"] is True
     assert rc == 0
 ```
@@ -740,8 +741,12 @@ def render(name, **ctx):
 
 
 def test_config_renders_card_and_dev():
-    out = render("shairport-sync.conf.j2", airplay_name="Living Room",
-                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="Living Room",
+        airplay_alsa_card="Device",
+        airplay_alsa_device=0,
+    )
     assert 'name = "Living Room"' in out
     assert 'output_device = "hw:CARD=Device,DEV=0"' in out
     assert 'interpolation = "soxr"' in out
@@ -749,15 +754,20 @@ def test_config_renders_card_and_dev():
 
 
 def test_config_omits_device_id_by_default():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    out = render(
+        "shairport-sync.conf.j2", airplay_name="X", airplay_alsa_card="Device", airplay_alsa_device=0
+    )
     assert "airplay_device_id" not in out
 
 
 def test_config_includes_device_id_when_set():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0,
-                 airplay_device_id="5C:AA:FD:11:22:33")
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="Device",
+        airplay_alsa_device=0,
+        airplay_device_id="5C:AA:FD:11:22:33",
+    )
     assert "airplay_device_id = 5C:AA:FD:11:22:33;" in out
 
 

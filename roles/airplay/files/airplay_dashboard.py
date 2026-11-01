@@ -7,6 +7,7 @@ modern Apple sources: a volume slider (shairport SetAirplayVolume over D-Bus)
 and a disconnect button (DropSession). Transport (play/pause/next) is omitted
 because iOS 17.4+/macOS 14.4+ ignore those commands from a receiver.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,12 +41,11 @@ def volume_cmd(percent: int) -> list:
     and the '--' is required so busctl does not parse the negative dB value as
     options. Both were wrong before and the control silently did nothing.
     """
-    return _BUS + [SVC_IFACE + ".RemoteControl", "SetAirplayVolume", "d", "--",
-                   str(percent_to_db(percent))]
+    return [*_BUS, SVC_IFACE + ".RemoteControl", "SetAirplayVolume", "d", "--", str(percent_to_db(percent))]
 
 
 def disconnect_cmd() -> list:
-    return _BUS + [SVC_IFACE, "DropSession"]
+    return [*_BUS, SVC_IFACE, "DropSession"]
 
 
 def _run(cmd) -> bool:
@@ -65,8 +65,9 @@ def disconnect() -> bool:
 
 def service_active(name: str) -> bool:
     try:
-        out = subprocess.run(["systemctl", "is-active", name],
-                             capture_output=True, text=True, timeout=5).stdout
+        out = subprocess.run(
+            ["systemctl", "is-active", name], capture_output=True, text=True, timeout=5
+        ).stdout
         return out.strip() == "active"
     except (OSError, subprocess.SubprocessError):
         return False
@@ -77,8 +78,15 @@ def read_state() -> dict:
         with open(STATE_FILE, encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
-        return {"active": False, "title": "", "artist": "", "album": "",
-                "volume_percent": 0, "muted": False, "cover": None}
+        return {
+            "active": False,
+            "title": "",
+            "artist": "",
+            "album": "",
+            "volume_percent": 0,
+            "muted": False,
+            "cover": None,
+        }
 
 
 def read_doctor() -> dict:

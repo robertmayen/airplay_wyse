@@ -91,12 +91,11 @@ def _fixture_runner(overrides=None):
         "is_active:avahi-daemon": "active",
         "shairport_version": "4.3.7-OpenSSL-ALSA-soxr-AirPlay2",
         "ss": 'UNCONN 0 0 0.0.0.0:319 0.0.0.0:* users:(("nqptp",pid=1,fd=4))\n'
-              'UNCONN 0 0 0.0.0.0:320 0.0.0.0:* users:(("nqptp",pid=1,fd=5))\n',
+        'UNCONN 0 0 0.0.0.0:320 0.0.0.0:* users:(("nqptp",pid=1,fd=5))\n',
         "mdns": "+ eth0 IPv4 X _airplay._tcp local\n+ eth0 IPv4 X _raop._tcp local\n",
         "aplay": "hw:CARD=Device,DEV=0\n",
         "journal": "all good\n",
-        "config": 'airplay_device_id = "5C:AA:FD:11:22:33";\n'
-                  'output_device = "hw:CARD=Device,DEV=0";\n',
+        "config": 'airplay_device_id = "5C:AA:FD:11:22:33";\noutput_device = "hw:CARD=Device,DEV=0";\n',
     }
     if overrides:
         base.update(overrides)
@@ -139,6 +138,7 @@ def test_main_json_exit_code(capsys):
     rc = ad.main(["--json"], runner=_fixture_runner())
     out = capsys.readouterr().out
     import json
+
     assert json.loads(out)["ok"] is True
     assert rc == 0
 
@@ -150,13 +150,16 @@ def test_parse_output_device():
 
 
 def test_deep_probe_pass_and_fail():
-    ok_out = "HW Params of device \"hw:CARD=Device,DEV=0\":\nACCESS: MMAP_INTERLEAVED\n"
-    r = ad.build_report(_fixture_runner(
-        {"deep_open:hw:CARD=Device,DEV=0": ok_out}), deep=True)
+    ok_out = 'HW Params of device "hw:CARD=Device,DEV=0":\nACCESS: MMAP_INTERLEAVED\n'
+    r = ad.build_report(_fixture_runner({"deep_open:hw:CARD=Device,DEV=0": ok_out}), deep=True)
     assert any(c["name"] == "deep:device-open" and c["ok"] for c in r["checks"])
 
-    r = ad.build_report(_fixture_runner(
-        {"deep_open:hw:CARD=Device,DEV=0": "aplay: main:834: audio open error: Device or resource busy\n"}), deep=True)
+    r = ad.build_report(
+        _fixture_runner(
+            {"deep_open:hw:CARD=Device,DEV=0": "aplay: main:834: audio open error: Device or resource busy\n"}
+        ),
+        deep=True,
+    )
     assert r["ok"] is False
     assert any(c["name"] == "deep:device-open" and not c["ok"] for c in r["checks"])
 

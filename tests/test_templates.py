@@ -1,4 +1,5 @@
 import pathlib
+
 from jinja2 import Environment, FileSystemLoader
 
 TPL = pathlib.Path(__file__).resolve().parents[1] / "roles/airplay/templates"
@@ -10,8 +11,12 @@ def render(name, **ctx):
 
 
 def test_config_renders_card_and_dev():
-    out = render("shairport-sync.conf.j2", airplay_name="Living Room",
-                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="Living Room",
+        airplay_alsa_card="Device",
+        airplay_alsa_device=0,
+    )
     assert 'name = "Living Room"' in out
     assert 'output_device = "hw:CARD=Device,DEV=0"' in out
     assert 'interpolation = "soxr"' in out
@@ -19,15 +24,20 @@ def test_config_renders_card_and_dev():
 
 
 def test_config_omits_device_id_by_default():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    out = render(
+        "shairport-sync.conf.j2", airplay_name="X", airplay_alsa_card="Device", airplay_alsa_device=0
+    )
     assert "airplay_device_id" not in out
 
 
 def test_config_includes_device_id_when_set():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0,
-                 airplay_device_id="5C:AA:FD:11:22:33")
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="Device",
+        airplay_alsa_device=0,
+        airplay_device_id="5C:AA:FD:11:22:33",
+    )
     assert "airplay_device_id = 5C:AA:FD:11:22:33;" in out
 
 
@@ -43,21 +53,25 @@ def test_override_has_state_and_device_directives():
 
 
 def test_config_emits_output_rate_when_set():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0,
-                 airplay_output_rate=48000)
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="Device",
+        airplay_alsa_device=0,
+        airplay_output_rate=48000,
+    )
     assert "output_rate = 48000;" in out
 
 
 def test_config_omits_output_rate_by_default():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    out = render(
+        "shairport-sync.conf.j2", airplay_name="X", airplay_alsa_card="Device", airplay_alsa_device=0
+    )
     assert "output_rate" not in out
 
 
 def test_config_default_dev_when_alsa_device_omitted():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device")
+    out = render("shairport-sync.conf.j2", airplay_name="X", airplay_alsa_card="Device")
     assert 'output_device = "hw:CARD=Device,DEV=0"' in out
 
 
@@ -67,48 +81,67 @@ def test_override_has_after_ordering():
 
 
 def test_config_alsa_prefix_override():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
-                 airplay_alsa_prefix="plughw")
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="AUDIO",
+        airplay_alsa_device=0,
+        airplay_alsa_prefix="plughw",
+    )
     assert 'output_device = "plughw:CARD=AUDIO,DEV=0"' in out
 
 
 def test_config_5x_emits_output_format_auto():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
-                 shairport_major="5")
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="AUDIO",
+        airplay_alsa_device=0,
+        shairport_major="5",
+    )
     assert 'output_format = "auto"' in out
 
 
 def test_config_4x_omits_output_format():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
-                 shairport_major="4")
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="AUDIO",
+        airplay_alsa_device=0,
+        shairport_major="4",
+    )
     assert "output_format" not in out
 
 
 def test_config_metadata_block_when_enabled():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="AUDIO", airplay_alsa_device=0,
-                 airplay_metadata_enabled=True,
-                 airplay_metadata_pipe="/run/shairport-sync/metadata-pipe")
-    assert 'metadata = {' in out
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="AUDIO",
+        airplay_alsa_device=0,
+        airplay_metadata_enabled=True,
+        airplay_metadata_pipe="/run/shairport-sync/metadata-pipe",
+    )
+    assert "metadata = {" in out
     assert 'include_cover_art = "yes"' in out
     assert 'pipe_name = "/run/shairport-sync/metadata-pipe"' in out
     assert 'dbus_service_bus = "system"' in out
 
 
 def test_config_no_metadata_block_by_default():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="AUDIO", airplay_alsa_device=0)
+    out = render("shairport-sync.conf.j2", airplay_name="X", airplay_alsa_card="AUDIO", airplay_alsa_device=0)
     assert "metadata = {" not in out
     assert "dbus_service_bus" not in out
 
 
 def test_dashboard_unit_has_bind_env_and_hardening():
-    out = render("airplay-dashboard.service.j2", airplay_name="Living Room",
-                 airplay_service_user="shairport-sync",
-                 airplay_dashboard_bind="127.0.0.1", airplay_dashboard_port=8080)
+    out = render(
+        "airplay-dashboard.service.j2",
+        airplay_name="Living Room",
+        airplay_service_user="shairport-sync",
+        airplay_dashboard_bind="127.0.0.1",
+        airplay_dashboard_port=8080,
+    )
     assert "Environment=AIRPLAY_DASHBOARD_BIND=127.0.0.1" in out
     assert "NoNewPrivileges=yes" in out
     assert "ProtectSystem=strict" in out
@@ -118,9 +151,12 @@ def test_dashboard_unit_has_bind_env_and_hardening():
 
 
 def test_nowplaying_unit_is_hardened_and_networkless():
-    out = render("airplay-nowplaying.service.j2", airplay_name="Living Room",
-                 airplay_service_user="shairport-sync",
-                 airplay_metadata_pipe="/run/shairport-sync/metadata-pipe")
+    out = render(
+        "airplay-nowplaying.service.j2",
+        airplay_name="Living Room",
+        airplay_service_user="shairport-sync",
+        airplay_metadata_pipe="/run/shairport-sync/metadata-pipe",
+    )
     assert "NoNewPrivileges=yes" in out
     assert "ProtectSystem=strict" in out
     assert "RestrictAddressFamilies=AF_UNIX" in out
@@ -135,8 +171,9 @@ def test_nqptp_override_grants_bind_capability():
 
 
 def test_unit_no_output_detect_runs_as_user():
-    out = render("shairport-sync.service.j2", airplay_name="living room",
-                 airplay_service_user="shairport-sync")
+    out = render(
+        "shairport-sync.service.j2", airplay_name="living room", airplay_service_user="shairport-sync"
+    )
     assert "shairport-output-detect" not in out
     assert "User=shairport-sync" in out
     assert "ExecStart=/usr/local/bin/shairport-sync -c /etc/shairport-sync.conf" in out
@@ -152,13 +189,18 @@ def test_health_service_writes_json_atomically():
 
 
 def test_config_disable_standby_default_always():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0)
+    out = render(
+        "shairport-sync.conf.j2", airplay_name="X", airplay_alsa_card="Device", airplay_alsa_device=0
+    )
     assert 'disable_standby_mode = "always"' in out
 
 
 def test_config_disable_standby_override():
-    out = render("shairport-sync.conf.j2", airplay_name="X",
-                 airplay_alsa_card="Device", airplay_alsa_device=0,
-                 airplay_alsa_disable_standby="never")
+    out = render(
+        "shairport-sync.conf.j2",
+        airplay_name="X",
+        airplay_alsa_card="Device",
+        airplay_alsa_device=0,
+        airplay_alsa_disable_standby="never",
+    )
     assert 'disable_standby_mode = "never"' in out

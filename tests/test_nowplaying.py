@@ -11,10 +11,7 @@ _spec.loader.exec_module(np)
 def _item(tag_type: str, tag_code: str, payload: bytes = b"") -> bytes:
     th = tag_type.encode().hex()
     ch = tag_code.encode().hex()
-    if payload:
-        data = f'<data encoding="base64">\n{base64.b64encode(payload).decode()}</data>'
-    else:
-        data = ""
+    data = f'<data encoding="base64">\n{base64.b64encode(payload).decode()}</data>' if payload else ""
     return f"<item><type>{th}</type><code>{ch}</code><length>{len(payload)}</length>{data}</item>".encode()
 
 

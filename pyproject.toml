@@ -1,0 +1,16 @@
+# Tool configuration only — this repo ships no Python package. The scripts in
+# roles/airplay/files/ are stdlib-only single files deployed to Debian 13
+# (Python 3.13); scripts/ and tests/ run on the control machine / CI.
+[tool.ruff]
+target-version = "py313"
+line-length = 110
+extend-exclude = [".ansible"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# The formatter owns line length; long literals (embedded HTML/CSS) are fine.
+# RUF001: the dashboard UI uses typographic characters (–, …) on purpose.
+ignore = ["E501", "RUF001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

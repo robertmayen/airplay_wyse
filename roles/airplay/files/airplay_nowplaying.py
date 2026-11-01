@@ -12,6 +12,7 @@ type/code are 4-char tags as 8 hex digits. 'core' items are DMAP track fields
 (minm=title, asar=artist, asal=album); 'ssnc' items are shairport events
 (pbeg/pend session, pvol volume, PICT cover art).
 """
+
 from __future__ import annotations
 
 import base64
