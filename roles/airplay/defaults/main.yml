@@ -6,6 +6,12 @@ nqptp_version: "1.2.8"
 nqptp_commit: "c925f27c1fd12e4033ac477e5a405969b0b0260b"            # tag 1.2.8
 alac_ref: "5d8c5db0dfcadd5872f28e665cf4f4303447352a"                # was floating "master"
 
+# The pairs above, as shipped. validate.yml refuses a run that overrides a
+# version but not its commit: that would silently build the default commit.
+_airplay_shipped_pins:
+  shairport: {version: "4.3.7", commit: "0b1c4391ffd398e7b145eb4b98416261380adeea"}
+  nqptp: {version: "1.2.8", commit: "c925f27c1fd12e4033ac477e5a405969b0b0260b"}
+
 _shairport_flags:
   "4": >-
     --sysconfdir=/etc --with-alsa --with-soxr --with-avahi --with-ssl=openssl
@@ -31,11 +37,33 @@ airplay_deb_release_tag: "debs-shairport{{ shairport_sync_version }}-nqptp{{ nqp
 # CI's smoke job uses this; operators can too for air-gapped runs.
 airplay_deb_dir: ""
 
+# --- shairport-sync.conf ------------------------------------------------------
+# Required per host (no defaults): airplay_name, airplay_alsa_card.
+# Pin the AirPlay 2 device-id instead of deriving it from the NIC MAC. Any
+# spelling works: "5C:AA:FD:11:22:33" or "0x5CAAFD112233L". Empty = from MAC.
+airplay_device_id: ""
+airplay_alsa_device: 0
+airplay_session_timeout: 60
+# 5.x only: "auto" lets shairport pick the DAC's best format.
+airplay_output_format: "auto"
+# Force the output rate (e.g. 48000) when a DAC can't do 44.1 kHz; 0 = native.
+airplay_output_rate: 0
+
+# Tools the doctor, discover.yml and the dashboard rely on (both install methods).
+airplay_runtime_packages:
+  - alsa-utils
+  - avahi-daemon
+  - avahi-utils
+  - dbus
+  - iproute2
+  - python3
+
 airplay_build_root: /usr/local/src/airplay
 airplay_state_dir: shairport-sync
-# Periodic airplay-doctor run (30 min): publishes JSON to /run/airplay-doctor.json
+# Periodic airplay-doctor run: publishes JSON to /run/airplay-doctor.json
 # (tmpfs only — never /etc) for the dashboard's health badge.
 airplay_health_timer: true
+airplay_health_interval_minutes: 30
 
 # Now-playing metadata + D-Bus control + web dashboard (opt-in feature).
 # When true: build shairport with --with-metadata --with-dbus-interface,
@@ -51,6 +79,10 @@ airplay_dashboard_bind: "127.0.0.1"
 
 # Dedicated system user shairport-sync runs as.
 airplay_service_user: shairport-sync
+
+# Final gate: after handlers ran, services must stay active (no restarts) for
+# this long, or the play fails instead of reporting a crash-looping box as ok.
+airplay_gate_settle_seconds: 8
 
 # "always" keeps the DAC open (no standby clicks, device claimed at startup —
 # requires the card to exist). "never"/"auto" open it only during playback;

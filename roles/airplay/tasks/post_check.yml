@@ -1,0 +1,68 @@
+---
+# Final gate. `state: started` on a Type=simple unit only proves the process
+# forked, and the restart handlers run after it: without this gate a play
+# reported success while shairport-sync was crash-looping.
+- name: Apply pending restarts before the gate
+  ansible.builtin.meta: flush_handlers
+
+- name: Health gate
+  when: not ansible_check_mode
+  vars:
+    _gate_units: >-
+      {{ ['nqptp', 'shairport-sync']
+         + (['airplay-nowplaying', 'airplay-dashboard'] if airplay_metadata_enabled | bool else []) }}
+  block:
+    # The systemd module with only `name` changes nothing and returns every
+    # unit property (ActiveState, NRestarts, ...) in `status`.
+    - name: Sample unit state and restart counters
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+      loop: "{{ _gate_units }}"
+      register: airplay_gate_before
+
+    - name: Give a crash-looping unit time to restart
+      ansible.builtin.wait_for:
+        timeout: "{{ airplay_gate_settle_seconds }}"
+
+    - name: Sample again
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+      loop: "{{ _gate_units }}"
+      register: airplay_gate_after
+
+    - name: Assert units are active and did not restart
+      vars:
+        _before: "{{ airplay_gate_before.results | map(attribute='status') | list }}"
+        _after: "{{ airplay_gate_after.results | map(attribute='status') | list }}"
+        _summary: >-
+          {% for s in _after %}{{ s.Id }}={{ s.ActiveState }}/restarts {{ s.NRestarts }}{{ ', ' if not loop.last }}{% endfor %}
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - _after | map(attribute='ActiveState') | reject('equalto', 'active') | list | length == 0
+          - _before | map(attribute='NRestarts') | list == _after | map(attribute='NRestarts') | list
+        fail_msg: "Units are not stably active ({{ _summary }}); see journalctl -u <unit> on the box."
+
+    - name: Wait for AirPlay (TCP 7000) and nqptp (UDP 319/320) to listen
+      ansible.builtin.command: ss -Hlntu '( sport = :7000 or sport = :319 or sport = :320 )'
+      register: airplay_gate_ports
+      changed_when: false
+      until: >-
+        airplay_gate_ports.stdout_lines | select('search', '^tcp.*:7000\\b') | list | length > 0
+        and airplay_gate_ports.stdout_lines | select('search', '^udp.*:319\\b') | list | length > 0
+        and airplay_gate_ports.stdout_lines | select('search', '^udp.*:320\\b') | list | length > 0
+      retries: 15
+      delay: 2
+
+    - name: Dashboard answers
+      when: airplay_metadata_enabled | bool
+      vars:
+        # Wildcard binds are reached via loopback; IPv6 literals need brackets.
+        _dash_host: >-
+          {{ {'0.0.0.0': '127.0.0.1', '::': '::1'}.get(airplay_dashboard_bind, airplay_dashboard_bind) }}
+      ansible.builtin.uri:
+        url: "http://{{ ('[' ~ _dash_host ~ ']') if ':' in _dash_host else _dash_host }}:{{ airplay_dashboard_port }}/api/status"
+      register: airplay_gate_dashboard
+      until: airplay_gate_dashboard.status == 200
+      retries: 10
+      delay: 2

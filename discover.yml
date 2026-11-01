@@ -24,6 +24,8 @@
           if [ -f "$c/usbid" ]; then cat "$c/id"; exit 0; fi
         done
         aplay -L 2>/dev/null | grep -oE 'CARD=[^,]+' | head -1 | cut -d= -f2
+      args:
+        executable: /bin/bash  # pipefail is a bashism; /bin/sh is dash on Debian
       register: suggested
       changed_when: false
       failed_when: false

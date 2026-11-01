@@ -1,34 +1,67 @@
 ---
+# Fleet health: runs airplay-doctor on every box, then fails the play if any
+# box is unhealthy, unreachable, or advertises a device-id another box uses.
 - name: Collect health from each box
   hosts: airplay
   become: true
   gather_facts: false
+  vars:
+    airplay_doctor_bin: /usr/local/bin/airplay-doctor
   tasks:
     - name: Run airplay-doctor
-      ansible.builtin.command: /usr/local/bin/airplay-doctor --json
+      ansible.builtin.command: "{{ airplay_doctor_bin }} --json"
       register: airplay_doctor_out
       changed_when: false
       failed_when: false
+      check_mode: false
 
-    - name: Parse report
+    - name: Summarize report
+      vars:
+        _report: >-
+          {{ airplay_doctor_out.stdout | from_json
+             if (airplay_doctor_out.stdout | default('') | trim)[:1] == '{' else {} }}
       ansible.builtin.set_fact:
-        airplay_report: "{{ airplay_doctor_out.stdout | from_json }}"
+        airplay_summary:
+          host: "{{ inventory_hostname }}"
+          reported: "{{ _report | length > 0 }}"
+          ok: "{{ _report.ok | default(false) }}"
+          device_id: "{{ _report.device_id | default('') }}"
+          versions: "{{ _report.versions | default({}) }}"
+          failed: "{{ _report.checks | default([]) | rejectattr('ok') | map(attribute='name') | list }}"
+          error: >-
+            {{ '' if _report else
+               ((airplay_doctor_out.stderr | default('', true)) or (airplay_doctor_out.msg | default(''))) | trim }}
 
     - name: Show per-host status
       ansible.builtin.debug:
-        msg: "{{ inventory_hostname }}: {{ 'OK' if airplay_report.ok else 'FAIL' }} (device-id {{ airplay_report.device_id }})"
+        msg: >-
+          {{ inventory_hostname }}:
+          {{ 'OK' if airplay_summary.ok else 'FAIL' }}
+          {{ ('(' ~ airplay_summary.failed | join(', ') ~ ')') if airplay_summary.failed else '' }}
+          {{ ('no report: ' ~ airplay_summary.error) if not airplay_summary.reported else '' }}
+          device-id {{ airplay_summary.device_id or '?' }}
 
-- name: Fleet-wide checks
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Gather all device-ids
-      ansible.builtin.set_fact:
-        fleet_ids: "{{ groups['airplay'] | map('extract', hostvars, ['airplay_report', 'device_id']) | select('string') | list }}"
+    - name: Fleet verdict
+      run_once: true
+      vars:
+        # *_all = every host this run targeted (honours --limit); the other
+        # list drops hosts that were unreachable, so those have no summary.
+        _missing: "{{ ansible_play_hosts_all | difference(ansible_play_hosts) }}"
+        _present: "{{ ansible_play_hosts | map('extract', hostvars, 'airplay_summary') | list }}"
+        _unhealthy: "{{ _present | rejectattr('ok') | map(attribute='host') | list }}"
+        _ids: "{{ _present | map(attribute='device_id') | select | list }}"
+      block:
+        - name: Assert advertised device-ids are unique across the fleet
+          ansible.builtin.assert:
+            quiet: true
+            that: _ids | length == _ids | unique | length
+            fail_msg: "Duplicate AirPlay device-id across the fleet: {{ _ids }} (pin airplay_device_id per host)"
 
-    - name: Assert device-ids are unique across the fleet
-      ansible.builtin.assert:
-        that:
-          - "fleet_ids | length == fleet_ids | unique | length"
-        fail_msg: "Duplicate AirPlay device-id across the fleet: {{ fleet_ids }}"
-        success_msg: "All fleet device-ids are unique."
+        - name: Assert every box reported and is healthy
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - _missing | length == 0
+              - _unhealthy | length == 0
+            fail_msg: "unreachable: {{ _missing }}; unhealthy: {{ _unhealthy }}"
+            success_msg: "All {{ _present | length }} boxes healthy, device-ids unique."

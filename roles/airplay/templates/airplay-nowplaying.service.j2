@@ -1,8 +1,11 @@
 [Unit]
-Description=AirPlay now-playing metadata reader ({{ airplay_name }})
+Description=AirPlay now-playing metadata reader ({{ airplay_name | airplay_systemd_plain }})
 # Managed by airplay_wyse Ansible.
 After=shairport-sync.service
 Wants=shairport-sync.service
+# Restarted together with shairport-sync (the reader also reopens a replaced
+# FIFO on its own; this is belt and braces).
+PartOf=shairport-sync.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -11,7 +14,7 @@ User={{ airplay_service_user }}
 Group={{ airplay_service_user }}
 RuntimeDirectory=airplay
 RuntimeDirectoryMode=0755
-Environment=AIRPLAY_METADATA_PIPE={{ airplay_metadata_pipe }}
+Environment="AIRPLAY_METADATA_PIPE={{ airplay_metadata_pipe | airplay_systemd_quoted }}"
 Environment=AIRPLAY_STATE_DIR=/run/airplay
 ExecStart=/usr/local/bin/airplay-nowplaying
 # Sandbox: reads the metadata pipe and writes only its RuntimeDirectory.

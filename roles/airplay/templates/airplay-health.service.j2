@@ -4,6 +4,10 @@ Description=AirPlay Wyse health check
 
 [Service]
 Type=oneshot
+# Probes have their own timeouts; this bounds the whole run, so one wedged
+# probe can't leave the unit "activating" forever (the timer would then never
+# start it again).
+TimeoutStartSec=180
 # Atomic write; doctor's exit code is preserved so an unhealthy box still
 # flips this unit (and `systemctl --failed`) red. The dashboard reads the JSON.
 ExecStart=/bin/sh -c '/usr/local/bin/airplay-doctor --json > /run/airplay-doctor.json.tmp; rc=$?; mv /run/airplay-doctor.json.tmp /run/airplay-doctor.json; exit $rc'

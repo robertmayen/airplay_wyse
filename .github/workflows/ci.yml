@@ -61,10 +61,13 @@ jobs:
         run: ci/converge.sh play
       - name: "Idempotence (run 2: must report changed=0)"
         run: ci/converge.sh idempotent --diff
-      - name: Verify services actually running
+      - name: "Check mode (run 3: --check --diff must report changed=0)"
+        run: ci/converge.sh check
+      - name: airplay-doctor on the converged box
         run: |
-          ci/converge.sh exec systemctl is-active nqptp shairport-sync
           ci/converge.sh exec shairport-sync -V
+          ci/converge.sh exec airplay-doctor --json > doctor.json || true
+          python3 ci/assert-doctor.py < doctor.json
       - name: Dump logs on failure
         if: failure()
         run: ci/converge.sh logs

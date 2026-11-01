@@ -1,22 +1,51 @@
 ---
-# Feature verification runs EVERY play, for both install methods,
-# regardless of the source-build stamp.
+# Runs EVERY play, for both install methods, regardless of the build stamp.
+# In --check mode on a box without binaries these probes can't succeed, so
+# failures there are reported but not fatal.
 - name: Capture shairport-sync version string
   ansible.builtin.command: shairport-sync -V
   register: airplay_sps_version
   changed_when: false
+  check_mode: false
+  ignore_errors: "{{ ansible_check_mode }}"
 
-- name: Assert required shairport features are present (token-tolerant)
-  ansible.builtin.assert:
-    that:
-      - "feature | lower | replace(' ', '') in (airplay_sps_version.stdout | lower | replace(' ', ''))"
-    fail_msg: "shairport-sync is missing required feature: {{ feature }}"
-  loop: "{{ airplay_required_features }}"
-  loop_control:
-    loop_var: feature
-
-- name: Capture nqptp version (uppercase -V)
+- name: Capture nqptp version string
   ansible.builtin.command: nqptp -V
   register: airplay_nqptp_version
   changed_when: false
-  failed_when: airplay_nqptp_version.rc != 0
+  check_mode: false
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Assert the installed binaries are the pinned builds
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - airplay_sps_version.stdout | airplay_is_pinned(shairport_sync_version, shairport_sync_commit)
+      - airplay_nqptp_version.stdout | airplay_is_pinned(nqptp_version, nqptp_commit)
+    fail_msg: >-
+      Installed: shairport-sync '{{ airplay_sps_version.stdout }}', nqptp '{{ airplay_nqptp_version.stdout }}';
+      pinned: {{ shairport_sync_version }} / {{ nqptp_version }}.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Assert required shairport features are present (token-tolerant)
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - "feature | lower | replace(' ', '') in (airplay_sps_version.stdout | lower | replace(' ', ''))"
+    fail_msg: "shairport-sync is missing required feature: {{ feature }}"
+  loop: "{{ airplay_required_features + (['metadata', 'dbus'] if airplay_metadata_enabled | bool else []) }}"
+  loop_control:
+    loop_var: feature
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# shairport-sync only talks to an nqptp with the same shared-memory interface
+# version (e.g. 4.3.7/5.0.x need smi10, nqptp 1.2.9 is smi11). Both print it.
+- name: Assert shairport-sync and nqptp speak the same SMI version
+  vars:
+    _sps_smi: "{{ airplay_sps_version.stdout | regex_search('smi[0-9]+') }}"
+    _nqptp_smi: "{{ airplay_nqptp_version.stdout | regex_search('smi[0-9]+') }}"
+  ansible.builtin.assert:
+    quiet: true
+    that: not _sps_smi or not _nqptp_smi or _sps_smi == _nqptp_smi
+    fail_msg: "shairport-sync speaks {{ _sps_smi }} but nqptp {{ _nqptp_smi }}: AirPlay 2 timing would not work."
+  ignore_errors: "{{ ansible_check_mode }}"

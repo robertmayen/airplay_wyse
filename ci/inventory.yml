@@ -17,3 +17,5 @@ all:
           airplay_alsa_card: "Phantom"
           airplay_alsa_device: 0
           airplay_alsa_disable_standby: "never"
+          # Maximum coverage: metadata build, D-Bus, now-playing reader, dashboard.
+          airplay_metadata_enabled: true

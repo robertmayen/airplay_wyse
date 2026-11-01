@@ -3,8 +3,7 @@ Description=Run AirPlay Wyse health check periodically
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=30min
-Persistent=true
+OnUnitActiveSec={{ airplay_health_interval_minutes | int }}min
 
 [Install]
 WantedBy=timers.target

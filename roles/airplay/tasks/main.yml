@@ -1,4 +1,13 @@
 ---
+- name: Validate settings
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Install runtime packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Create the service user
+  ansible.builtin.import_tasks: user.yml
+
 - name: Build stack from source
   ansible.builtin.import_tasks: build.yml
   when: airplay_install_method == "source"
@@ -7,7 +16,7 @@
   ansible.builtin.import_tasks: install_deb.yml
   when: airplay_install_method == "deb"
 
-- name: Verify required features
+- name: Verify the installed build
   ansible.builtin.import_tasks: verify.yml
 
 - name: Record source-build stamp
@@ -26,3 +35,6 @@
 - name: Install metadata reader and web dashboard
   ansible.builtin.import_tasks: dashboard.yml
   when: airplay_metadata_enabled | bool
+
+- name: Gate on healthy, stable services
+  ansible.builtin.import_tasks: post_check.yml

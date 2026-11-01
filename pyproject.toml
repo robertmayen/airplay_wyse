@@ -14,3 +14,4 @@ ignore = ["E501", "RUF001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]

@@ -1,0 +1,33 @@
+---
+# Checks argument_specs can't express. Fail before anything is touched.
+- name: Validate host settings
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - airplay_name | string | trim | length > 0
+      - airplay_name | string | length <= 63  # mDNS instance-name limit
+      - airplay_name is not search('[\x00-\x1f\x7f]')
+      - airplay_alsa_card is match('^[A-Za-z0-9_-]+$')
+      - airplay_device_id | string | length == 0 or
+        (airplay_device_id | regex_replace('^\\s*0[xX]|[lL]\\s*$', '') | regex_replace('[:\\s-]', '')) is match('^[0-9A-Fa-f]{12}$')
+    fail_msg: >-
+      Invalid host settings: airplay_name must be 1-63 printable characters,
+      airplay_alsa_card the bare CARD= token from `aplay -L` (letters, digits, _ -),
+      airplay_device_id empty or a MAC such as 5C:AA:FD:11:22:33.
+
+# A version override without its commit builds the DEFAULT commit with the
+# override's flags and stamps it with the override's version — a silent
+# downgrade that verify.yml only catches after the fact.
+- name: Refuse version pins without their commit
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - shairport_sync_version == _airplay_shipped_pins.shairport.version or
+        shairport_sync_commit != _airplay_shipped_pins.shairport.commit
+      - nqptp_version == _airplay_shipped_pins.nqptp.version or
+        nqptp_commit != _airplay_shipped_pins.nqptp.commit
+    fail_msg: >-
+      shairport_sync_version / nqptp_version is overridden but the matching
+      *_commit is not, so the role would build the default commit instead.
+      Set shairport_sync_commit / nqptp_commit too
+      (git ls-remote https://github.com/mikebrady/<repo> <tag>).

@@ -25,9 +25,29 @@
       alac={{ alac_ref }}|flags={{ shairport_configure_flags }}
     airplay_stamp_current: "{{ (airplay_stamp_raw.content | b64decode | from_json) if airplay_stamp_raw.content is defined else {} }}"
 
+# The stamp alone can lie (binary removed, broken by a library soname bump,
+# or built from the wrong commit): also ask the binaries themselves.
+- name: Probe installed shairport-sync
+  ansible.builtin.command: shairport-sync -V
+  register: airplay_sps_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Probe installed nqptp
+  ansible.builtin.command: nqptp -V
+  register: airplay_nqptp_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
 - name: Decide whether a rebuild is needed
   ansible.builtin.set_fact:
-    airplay_needs_build: "{{ airplay_stamp_current.get('signature', '') != airplay_build_signature }}"
+    airplay_needs_build: >-
+      {{ airplay_stamp_current.get('signature', '') != airplay_build_signature
+         or airplay_sps_probe.rc != 0 or airplay_nqptp_probe.rc != 0
+         or not (airplay_sps_probe.stdout | airplay_is_pinned(shairport_sync_version, shairport_sync_commit))
+         or not (airplay_nqptp_probe.stdout | airplay_is_pinned(nqptp_version, nqptp_commit)) }}
 
 - name: Build and install ALAC (major 4 only)
   when: shairport_major == "4" and airplay_needs_build
@@ -37,12 +57,13 @@
         repo: https://github.com/mikebrady/alac
         dest: "{{ airplay_build_root }}/alac"
         version: "{{ alac_ref }}"
+        force: true
     - name: Build ALAC
       ansible.builtin.shell: |
         set -e
         autoreconf -fi
         ./configure
-        make
+        make -j{{ ansible_facts.processor_nproc | default(2) }}
         make install
         ldconfig
       args:
@@ -63,11 +84,12 @@
         set -e
         autoreconf -fi
         ./configure --with-systemd-startup
-        make
+        make -j{{ ansible_facts.processor_nproc | default(2) }}
         make install
       args:
         chdir: "{{ airplay_build_root }}/nqptp"
       changed_when: true
+      notify: Restart nqptp
 
 - name: Build and install shairport-sync
   when: airplay_needs_build
@@ -83,7 +105,7 @@
         set -e
         autoreconf -fi
         ./configure {{ shairport_configure_flags }}
-        make
+        make -j{{ ansible_facts.processor_nproc | default(2) }}
         make install
       args:
         chdir: "{{ airplay_build_root }}/shairport-sync"

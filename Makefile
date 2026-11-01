@@ -31,6 +31,8 @@ converge:
 	ci/converge.sh up
 	ci/converge.sh play $(ARGS)
 	ci/converge.sh idempotent $(ARGS)
+	ci/converge.sh check $(ARGS)
+	ci/converge.sh exec airplay-doctor --json | python3 ci/assert-doctor.py
 
 converge-down:
 	ci/converge.sh down

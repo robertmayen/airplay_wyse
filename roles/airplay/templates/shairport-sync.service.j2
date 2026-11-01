@@ -1,7 +1,7 @@
 [Unit]
-Description=Shairport Sync ({{ airplay_name }}) - AirPlay 2 Audio Receiver
+Description=Shairport Sync ({{ airplay_name | airplay_systemd_plain }}) - AirPlay 2 Audio Receiver
 # Managed by airplay_wyse Ansible. Hardening + ordering live in 10-airplay.conf.
-After=network-online.target avahi-daemon.service sound.target alsa-restore.service local-fs.target systemd-udev-settle.service
+After=network-online.target avahi-daemon.service sound.target alsa-restore.service local-fs.target
 Wants=network-online.target avahi-daemon.service
 # Cold-start tolerance: a USB DAC can take several seconds to enumerate after
 # boot, and shairport-sync exits immediately (output_device_error / ENODEV) if
@@ -15,7 +15,10 @@ User={{ airplay_service_user }}
 Group={{ airplay_service_user }}
 SupplementaryGroups=audio
 RuntimeDirectory=shairport-sync
-RuntimeDirectoryMode=0755
+RuntimeDirectoryMode=0750
+# Keep /run/shairport-sync (and the metadata FIFO in it) across restarts: when
+# systemd removed it, the now-playing reader was left on a deleted FIFO.
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/local/bin/shairport-sync -c /etc/shairport-sync.conf
 Restart=on-failure
 RestartSec=5

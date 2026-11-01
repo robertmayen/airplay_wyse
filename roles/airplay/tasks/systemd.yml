@@ -1,19 +1,4 @@
 ---
-- name: Ensure shairport-sync group
-  ansible.builtin.group:
-    name: "{{ airplay_service_user }}"
-    system: true
-
-- name: Ensure shairport-sync user
-  ansible.builtin.user:
-    name: "{{ airplay_service_user }}"
-    group: "{{ airplay_service_user }}"
-    groups: audio
-    append: true
-    system: true
-    create_home: false
-    shell: /usr/sbin/nologin
-
 - name: Install managed shairport-sync unit
   ansible.builtin.template:
     src: shairport-sync.service.j2
@@ -75,11 +60,15 @@
         src: airplay-health.service.j2
         dest: /etc/systemd/system/airplay-health.service
         mode: "0644"
+      notify: Daemon reload
     - name: Install health timer unit
       ansible.builtin.template:
         src: airplay-health.timer.j2
         dest: /etc/systemd/system/airplay-health.timer
         mode: "0644"
+      notify:
+        - Daemon reload
+        - Restart airplay-health.timer
     - name: Enable health timer
       ansible.builtin.systemd:
         name: airplay-health.timer

@@ -1,0 +1,112 @@
+---
+# Validated automatically by Ansible before the role runs: typos in choices and
+# wrong types fail fast instead of silently skipping tasks. Default values live
+# only in defaults/main.yml (not repeated here, so they cannot drift).
+argument_specs:
+  main:
+    short_description: Turn a Debian 13 box with a USB DAC into an AirPlay 2 endpoint.
+    options:
+      airplay_name:
+        type: str
+        required: true
+        description: Advertised AirPlay name (1-63 printable characters).
+      airplay_alsa_card:
+        type: str
+        required: true
+        description: The bare CARD= token of the DAC from `aplay -L`.
+      airplay_alsa_device:
+        type: int
+        description: The DEV= number of the DAC.
+      airplay_alsa_prefix:
+        type: str
+        choices: [hw, plughw]
+        description: "hw = raw device (soxr resamples); plughw = ALSA plug layer (most tolerant)."
+      airplay_alsa_disable_standby:
+        type: str
+        choices: [always, auto, never]
+        description: Keep the DAC open (always), only while active (auto), or only during playback (never).
+      airplay_device_id:
+        type: str
+        description: Pinned AirPlay 2 device-id (a MAC in any spelling). Empty derives it from the NIC.
+      airplay_session_timeout:
+        type: int
+        description: Seconds before an unresponsive session is dropped.
+      airplay_output_format:
+        type: str
+        description: shairport-sync 5.x only; "auto" or an ALSA format such as S32_LE.
+      airplay_output_rate:
+        type: int
+        description: Force an output rate such as 48000; 0 keeps the native rate.
+      airplay_install_method:
+        type: str
+        choices: [source, deb]
+        description: Compile on the box (source) or install the CI-built packages (deb).
+      airplay_deb_revision:
+        type: int
+        description: Packaging revision of the CI-built debs.
+      airplay_deb_repo:
+        type: str
+        description: GitHub repo whose releases carry the debs.
+      airplay_deb_release_tag:
+        type: str
+        description: Release tag to download the debs from (derived from the pins).
+      airplay_deb_dir:
+        type: str
+        description: Pre-downloaded deb directory on the control machine; empty downloads the release.
+      shairport_major:
+        type: str
+        choices: ["4", "5"]
+        description: shairport-sync major version profile (configure flags, required features).
+      shairport_sync_version:
+        type: str
+        description: shairport-sync release to build.
+      shairport_sync_commit:
+        type: str
+        description: Commit SHA of shairport_sync_version (checkouts are pinned to commits).
+      nqptp_version:
+        type: str
+        description: nqptp release to build.
+      nqptp_commit:
+        type: str
+        description: Commit SHA of nqptp_version.
+      alac_ref:
+        type: str
+        description: mikebrady/alac commit (major-4 profile only).
+      airplay_metadata_enabled:
+        type: bool
+        description: Build with metadata + D-Bus and install the now-playing reader and dashboard.
+      airplay_metadata_pipe:
+        type: str
+        description: Metadata FIFO path (outside /tmp; the unit uses PrivateTmp).
+      airplay_dashboard_bind:
+        type: str
+        description: Dashboard listen address; "0.0.0.0" or "::" to reach it from the LAN.
+      airplay_dashboard_port:
+        type: int
+        description: Dashboard TCP port.
+      airplay_health_timer:
+        type: bool
+        description: Run airplay-doctor periodically and publish its JSON for the dashboard.
+      airplay_health_interval_minutes:
+        type: int
+        description: Health-check interval.
+      airplay_service_user:
+        type: str
+        description: System user shairport-sync (and the metadata reader) run as.
+      airplay_state_dir:
+        type: str
+        description: StateDirectory/CacheDirectory name under /var/lib and /var/cache.
+      airplay_build_root:
+        type: path
+        description: Where sources are cloned for the source install method.
+      airplay_build_deps:
+        type: list
+        elements: str
+        description: Build dependencies for the source install method.
+      airplay_runtime_packages:
+        type: list
+        elements: str
+        description: Runtime tools installed for both install methods.
+      airplay_gate_settle_seconds:
+        type: int
+        description: How long services must stay up without restarting for the final gate.

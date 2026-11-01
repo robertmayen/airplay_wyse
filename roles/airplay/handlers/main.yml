@@ -1,13 +1,19 @@
 ---
-- name: Restart shairport-sync
+# Handlers run in the order defined here (not notify order): reload first,
+# then nqptp before shairport-sync (which Requires= it).
+- name: Daemon reload
   ansible.builtin.systemd:
-    name: shairport-sync
-    state: restarted
     daemon_reload: true
 
 - name: Restart nqptp
   ansible.builtin.systemd:
     name: nqptp
+    state: restarted
+    daemon_reload: true
+
+- name: Restart shairport-sync
+  ansible.builtin.systemd:
+    name: shairport-sync
     state: restarted
     daemon_reload: true
 
@@ -23,6 +29,7 @@
     state: restarted
     daemon_reload: true
 
-- name: Daemon reload
+- name: Restart airplay-health.timer
   ansible.builtin.systemd:
-    daemon_reload: true
+    name: airplay-health.timer
+    state: restarted

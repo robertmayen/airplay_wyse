@@ -10,18 +10,21 @@
         state: directory
         suffix: airplay-debs
       register: airplay_deb_tmp
+      check_mode: false
 
     - name: Fetch release assets (uses your gh auth; private repos OK)
       ansible.builtin.command: >-
         gh release download {{ airplay_deb_release_tag }}
         -R {{ airplay_deb_repo }} -D {{ airplay_deb_tmp.path }}
       changed_when: false
+      check_mode: false
 
     - name: Verify checksums
       ansible.builtin.command: shasum -a 256 --check SHA256SUMS
       args:
         chdir: "{{ airplay_deb_tmp.path }}"
       changed_when: false
+      check_mode: false
 
     # run_once + set_fact applies the fact to every host in the play.
     - name: Point deb dir at the download
@@ -35,6 +38,7 @@
     paths: "{{ airplay_deb_dir }}"
     patterns: "*.deb"
   register: airplay_debs_found
+  check_mode: false
 
 - name: Assert the release carried all three packages
   ansible.builtin.assert:
